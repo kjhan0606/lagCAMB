@@ -285,9 +285,59 @@ class InteractingDE(DarkEnergyEqnOfState):
         )
 
 
+@fortran_class
+class FuzzyDMField(DarkEnergyModel):
+    """
+    Fuzzy/Ultralight Axion Dark Matter via Klein-Gordon background + EFA perturbations.
+
+    Solves the KG equation for V(phi) = (1/2)m^2 phi^2 to get correct background
+    evolution (frozen w=-1 at early times, matter-like w=0 after oscillation onset).
+    After a_match (where m/H = N_match), switches to effective fluid approximation
+    with Passaglia-Hu sound speed cs2 = k^2/(4m^2 a^2 + k^2).
+
+    Placed in DarkEnergy slot. Usage::
+
+        pars.set_cosmology(omch2=0.12*(1-f_axion), ...)
+        pars.DarkEnergy = FuzzyDMField()
+        pars.DarkEnergy.set_params(m_axion=1e-22, f_axion=0.05)
+
+    References: Hu+ 2000, Hlozek+ 2015, Passaglia & Hu 2022, Marsh 2016.
+    """
+
+    _fields_ = (
+        ("m_axion", c_double, "Axion mass [eV]"),
+        ("f_axion", c_double, "Fraction of CDM+axion budget that is axion"),
+        ("omega_axion_h2", c_double, "Axion density Omega_a h^2 (0 = use f_axion)"),
+        ("N_match", c_int, "KG->EFA transition criterion m/H"),
+        ("npoints_bg", c_int, "Background integration points"),
+        ("min_steps_per_osc_bg", c_int, "Min steps per oscillation"),
+    )
+
+    _fortran_class_module_ = "FuzzyDMField"
+    _fortran_class_name_ = "TFuzzyDMField"
+
+    def set_params(self, m_axion=1e-22, f_axion=0.0, omega_axion_h2=0.0, N_match=100):
+        """
+        Set fuzzy DM field parameters.
+
+        :param m_axion: axion mass [eV]
+        :param f_axion: fraction of CDM+axion budget that is axion
+        :param omega_axion_h2: axion density (0 uses f_axion * omch2)
+        :param N_match: KG->EFA transition criterion m/H (default 100)
+        """
+        self.m_axion = m_axion
+        self.f_axion = f_axion
+        self.omega_axion_h2 = omega_axion_h2
+        self.N_match = N_match
+
+    def __getstate__(self):
+        raise TypeError("Cannot save class with splines")
+
+
 # short names for models that support w/wa
 F2003Class._class_names.update({
     "fluid": DarkEnergyFluid,
     "ppf": DarkEnergyPPF,
     "interacting_de": InteractingDE,
+    "fuzzy_dm_field": FuzzyDMField,
 })

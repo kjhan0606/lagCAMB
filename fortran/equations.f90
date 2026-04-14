@@ -31,6 +31,8 @@
     use results
     use MassiveNu
     use DarkEnergyInterface
+    use DarkMatterInteraction
+    use MuSigmaMG
     use Transfer
     implicit none
     public
@@ -67,6 +69,7 @@
         real(dl) q, q2
         real(dl) k_buf,k2_buf ! set in initial
         logical :: is_cosmological_constant
+        logical :: is_standard_cdm = .true.  ! no DM interactions
 
         integer w_ix !Index of two quintessence equations
         integer Tg_ix !index of matter temerature perturbation
@@ -77,6 +80,11 @@
 
         integer r_ix !Index of the massless neutrino hierarchy
         integer g_ix !Index of the photon neutrino hierarchy
+
+        ! Dark matter interaction indices
+        integer dm_ix  !Index of interacting DM density perturbation (DM-DR)
+        integer dr_ix  !Index of dark radiation hierarchy (DM-DR)
+        integer vc_ix  !Index of CDM velocity (DM-baryon or DM-DR)
 
         integer q_ix !index into q_evolve array that gives the value q
         logical TransferOnly
@@ -589,6 +597,33 @@
         maxeq=maxeq+1
     end if
 
+    ! Dark matter interactions
+    EV%dm_ix = 0
+    EV%dr_ix = 0
+    EV%vc_ix = 0
+    EV%is_standard_cdm = .true.
+    if (allocated(CP%DarkMatter)) then
+        if (.not. CP%DarkMatter%is_standard_cdm) then
+            EV%is_standard_cdm = .false.
+            ! CDM velocity (for DM-baryon or DM-DR)
+            if (CP%DarkMatter%has_cdm_velocity) then
+                EV%vc_ix = neq + 1
+                neq = neq + 1
+                maxeq = maxeq + 1
+            end if
+            ! Interacting DM density perturbation (for DM-DR: separate from standard CDM)
+            if (CP%DarkMatter%num_dr_equations > 0) then
+                EV%dm_ix = neq + 1
+                neq = neq + 1  ! delta_dmdr
+                maxeq = maxeq + 1
+                ! DR Boltzmann hierarchy
+                EV%dr_ix = neq + 1
+                neq = neq + CP%DarkMatter%num_dr_equations
+                maxeq = maxeq + CP%DarkMatter%num_dr_equations
+            end if
+        end if
+    end if
+
     !Massive neutrinos
     if (CP%Num_Nu_massive /= 0) then
         EV%has_nu_relativistic = any(EV%nq(1:CP%Nu_Mass_eigenstates)/=State%NuPerturbations%nqmax)
@@ -650,6 +685,16 @@
     if (CP%DarkEnergy%num_perturb_equations > 0) &
         yout(EVOut%w_ix:EVOut%w_ix + CP%DarkEnergy%num_perturb_equations - 1) = &
         y(EV%w_ix:EV%w_ix + CP%DarkEnergy%num_perturb_equations - 1)
+
+    ! DarkMatter interactions
+    if (.not. EV%is_standard_cdm .and. .not. EVout%is_standard_cdm) then
+        if (EV%vc_ix > 0 .and. EVout%vc_ix > 0) yout(EVout%vc_ix) = y(EV%vc_ix)
+        if (EV%dm_ix > 0 .and. EVout%dm_ix > 0) yout(EVout%dm_ix) = y(EV%dm_ix)
+        if (EV%dr_ix > 0 .and. EVout%dr_ix > 0 .and. allocated(CP%DarkMatter)) then
+            lmax = CP%DarkMatter%num_dr_equations
+            if (lmax > 0) yout(EVout%dr_ix:EVout%dr_ix+lmax-1) = y(EV%dr_ix:EV%dr_ix+lmax-1)
+        end if
+    end if
 
     if (.not. EV%no_phot_multpoles .and. .not. EVout%no_phot_multpoles) then
         if (EV%TightCoupling .or. EVOut%TightCoupling) then
@@ -1778,6 +1823,11 @@
     nullify(EV%CustomSources)
 
     EV%is_cosmological_constant = State%CP%DarkEnergy%is_cosmological_constant
+    if (allocated(State%CP%DarkMatter)) then
+        EV%is_standard_cdm = State%CP%DarkMatter%is_standard_cdm
+    else
+        EV%is_standard_cdm = .true.
+    end if
 
     if (State%flat) then
         EV%k_buf=EV%q
@@ -1944,6 +1994,13 @@
 
     if (CP%Evolve_delta_Ts) then
         y(EV%Ts_ix) = y(EV%g_ix)/4
+    end if
+
+    ! DarkMatter interaction initial conditions
+    if (.not. EV%is_standard_cdm .and. allocated(CP%DarkMatter)) then
+        if (CP%DarkMatter%num_perturb_equations > 0) then
+            call CP%DarkMatter%PerturbationInitial(y, a, tau, k, EV%dm_ix, EV%dr_ix, EV%vc_ix)
+        end if
     end if
 
     !  Neutrinos
@@ -2142,6 +2199,8 @@
     use constants, only : barssc0, Compton_CT, line21_const
     use MassiveNu
     use Recombination, only : CB1
+    use DMNeutrino, only: TDMNeutrinoScattering
+    use InteractingDE, only: TInteractingDE, ide_Q_H_rho_de, ide_Q_H_rho_c, ide_Q_H_rho_tot
     implicit none
     type(EvolutionVars) EV
     integer n,nu_i
@@ -2228,6 +2287,13 @@
     grho = grho_matter+grhor_t+grhog_t+grhov_t
     gpres_noDE = gpres_nu + (grhor_t + grhog_t)/3
 
+    ! Add DM-DR background densities
+    if (.not. EV%is_standard_cdm) then
+        grho_matter = grho_matter + State%grhodmdr/a  ! interacting DM (matter-like)
+        grho = grho + State%grhodmdr/a + State%grhodr/a2  ! DM + DR
+        gpres_noDE = gpres_noDE + State%grhodr/a2/3._dl  ! DR pressure
+    end if
+
     if (State%flat) then
         adotoa=sqrt(grho/3)
         cothxor=1._dl/tau
@@ -2289,6 +2355,24 @@
         dgq = dgq + dgq_de
     end if
 
+    ! DM-DR perturbation contributions to total density and velocity
+    if (.not. EV%is_standard_cdm .and. allocated(CP%DarkMatter)) then
+        block
+            real(dl) :: dgrho_dm, dgq_dm
+            call CP%DarkMatter%PerturbedStressEnergy(dgrho_dm, dgq_dm, &
+                a, dgq, dgrho, grho, grhoc_t, adotoa, k, ay, ayprime, &
+                EV%dm_ix, EV%dr_ix, EV%vc_ix)
+            dgrho = dgrho + dgrho_dm
+            dgq = dgq + dgq_dm
+            dgrho_matter = dgrho_matter + dgrho_dm
+        end block
+        ! Add CDM velocity contribution if DM-baryon scattering is active
+        if (EV%vc_ix > 0 .and. CP%DarkMatter%num_dr_equations == 0) then
+            ! For DM-baryon (no DR), CDM velocity contributes to dgq
+            dgq = dgq + grhoc_t * ay(EV%vc_ix)
+        end if
+    end if
+
     !  Get sigma (shear) and z from the constraints
     ! have to get z from eta for numerical stability
     z=(0.5_dl*dgrho/k + etak)/adotoa
@@ -2306,8 +2390,63 @@
         EV%w_ix, a, adotoa, k, z, ay)
 
     !  CDM equation of motion
-    clxcdot=-k*z
+    if (.not. EV%is_standard_cdm .and. EV%vc_ix > 0 .and. allocated(CP%DarkMatter) &
+        .and. CP%DarkMatter%num_dr_equations == 0) then
+        ! DM-baryon scattering: CDM has velocity, delta_c' = -k*(z + v_c)
+        clxcdot = -k*(z + ay(EV%vc_ix))
+    else
+        clxcdot=-k*z
+    end if
     ayprime(ix_clxc)=clxcdot
+
+    ! InteractingDE: add interaction source to CDM and DE perturbation equations
+    ! For Q = xi*H*rho_de (type 1): delta_c' += xi*H*(rho_de/rho_c)*(delta_de - delta_c)
+    ! For Q = xi*H*rho_c  (type 2): delta_de' += -xi*H*(rho_c/rho_de)*(delta_de - delta_c)
+    if (.not. EV%is_cosmological_constant) then
+        select type(DE => State%CP%DarkEnergy)
+        type is (TInteractingDE)
+            if (DE%xi_ide /= 0._dl .and. EV%w_ix > 0) then
+                block
+                    real(dl) :: xi_src, delta_de_val, rho_de_over_c, rho_c_over_de
+                    real(dl) :: xi_rate_max
+                    delta_de_val = ay(EV%w_ix)
+                    rho_de_over_c = grhov_t / max(grhoc_t, 1e-30_dl)
+                    ! Cap rho_c/rho_de to prevent stiffness at early times
+                    rho_c_over_de = min(grhoc_t / max(grhov_t, 1e-30_dl), 1e4_dl)
+                    ! Maximum interaction rate: cap at 100*H to avoid numerical issues
+                    xi_rate_max = 100._dl * adotoa
+
+                    select case(DE%interaction_type)
+                    case(ide_Q_H_rho_de)
+                        ! CDM source: +xi*H*(rho_de/rho_c)*(delta_de - delta_c)
+                        xi_src = DE%xi_ide * adotoa * rho_de_over_c * (delta_de_val - clxc)
+                        ayprime(ix_clxc) = ayprime(ix_clxc) + xi_src
+                        ! DE source: +xi*H*delta_c (complement to existing -xi*H*delta_de in PerturbationEvolve)
+                        ayprime(EV%w_ix) = ayprime(EV%w_ix) + DE%xi_ide * adotoa * clxc
+
+                    case(ide_Q_H_rho_c)
+                        ! CDM source: +xi*H*(delta_de - delta_c) [Q/rho_c = xi*H]
+                        xi_src = DE%xi_ide * adotoa * (delta_de_val - clxc)
+                        ayprime(ix_clxc) = ayprime(ix_clxc) + xi_src
+                        ! DE source: -xi*H*(rho_c/rho_de)*(delta_de - delta_c)
+                        ! Cap rate to avoid stiffness when rho_de << rho_c at early times
+                        xi_src = min(abs(DE%xi_ide) * adotoa * rho_c_over_de, xi_rate_max)
+                        xi_src = sign(xi_src, DE%xi_ide)
+                        ayprime(EV%w_ix) = ayprime(EV%w_ix) - xi_src * (delta_de_val - clxc)
+
+                    case(ide_Q_H_rho_tot)
+                        ! CDM source: xi*H*(1+rho_de/rho_c)*0.5*(delta_de - delta_c)
+                        xi_src = DE%xi_ide * adotoa * (1._dl + rho_de_over_c) * 0.5_dl * (delta_de_val - clxc)
+                        ayprime(ix_clxc) = ayprime(ix_clxc) + xi_src
+                        ! DE source (capped)
+                        xi_src = min(abs(DE%xi_ide) * adotoa * (1._dl + rho_c_over_de) * 0.5_dl, xi_rate_max)
+                        xi_src = sign(xi_src, DE%xi_ide)
+                        ayprime(EV%w_ix) = ayprime(EV%w_ix) + xi_src * (clxc - delta_de_val)
+                    end select
+                end block
+            end if
+        end select
+    end if
 
     !  Baryon equation of motion.
     clxbdot=-k*(z+vb)
@@ -2395,7 +2534,23 @@
         vbdot=-adotoa*vb+k*delta_p_b-photbar*opacity*(4._dl/3*vb-qg)
     end if
 
+    ! Add DM-baryon back-reaction drag on baryons
+    if (.not. EV%is_standard_cdm .and. allocated(CP%DarkMatter) .and. EV%vc_ix > 0) then
+        block
+            real(dl) :: R_baryon, vc_dm
+            R_baryon = CP%DarkMatter%DragRate_Baryon(a, adotoa, grhoc_t, grhob_t)
+            vc_dm = ay(EV%vc_ix)
+            vbdot = vbdot - R_baryon * (vb - vc_dm)
+        end block
+    end if
+
     ayprime(ix_vb)=vbdot
+
+    ! Evolve DM interaction equations (CDM velocity for DM-baryon, or full DM-DR system)
+    if (.not. EV%is_standard_cdm .and. allocated(CP%DarkMatter)) then
+        call CP%DarkMatter%PerturbationEvolve(ayprime, a, adotoa, k, z, ay, &
+            EV%dm_ix, EV%dr_ix, EV%vc_ix, clxc, vb, grhoc_t, grhob_t, sigma)
+    end if
 
     if (.not. EV%no_phot_multpoles) then
         !  Photon equations of motion
@@ -2487,6 +2642,38 @@
             end if
         end if
     end if ! no_nu_multpoles
+
+    ! DM-Neutrino scattering: add collision terms to massless neutrino hierarchy
+    if (.not. EV%no_nu_multpoles .and. .not. EV%is_standard_cdm .and. allocated(CP%DarkMatter)) then
+        select type(DM => CP%DarkMatter)
+        type is (TDMNeutrinoScattering)
+            if (.not. DM%is_standard_cdm) then
+                block
+                    real(dl) :: R_nu_coll, vc_dm, grhonu_t_eff
+                    integer :: l_nu
+                    ! Neutrino density for collision rate
+                    grhonu_t_eff = grhor_t
+                    R_nu_coll = DM%NuCollisionRate(a, adotoa, grhoc_t, grhonu_t_eff)
+                    vc_dm = 0._dl
+                    if (EV%vc_ix > 0) vc_dm = ay(EV%vc_ix)
+                    ! F_0: unchanged (energy conservation)
+                    ! F_1 (qr): += R_nu * (4*v_c - qr) [momentum exchange]
+                    ayprime(EV%r_ix+1) = ayprime(EV%r_ix+1) + R_nu_coll * (4._dl*vc_dm - qr)
+                    ! F_l for l >= 2: += -R_nu * F_l [collisional damping]
+                    do l_nu = 2, EV%lmaxnr
+                        ayprime(EV%r_ix+l_nu) = ayprime(EV%r_ix+l_nu) - R_nu_coll * ay(EV%r_ix+l_nu)
+                    end do
+                    ! Also correct CDM velocity with actual v_nu = qr/4
+                    ! PerturbationEvolve set v_c' = -aH*v_c - R_dm*v_c
+                    ! Correction: + R_dm * qr/4 to get -R_dm*(v_c - qr/4)
+                    if (EV%vc_ix > 0) then
+                        ayprime(EV%vc_ix) = ayprime(EV%vc_ix) + &
+                            DM%DragRate_DM_nu(a, adotoa, grhoc_t, grhonu_t_eff) * qr / 4._dl
+                    end if
+                end block
+            end if
+        end select
+    end if
 
     if (EV%Evolve_baryon_cs) then
         if (EV%Evolve_TM) then
@@ -2692,6 +2879,22 @@
             EV%kf(1), k, grhov_t, z, k2, ayprime, ay, EV%w_ix)
         phi = -((dgrho +3*dgq*adotoa/k)/EV%Kf(1) + dgpi)/(2*k2)
 
+        ! Modified gravity mu-Sigma: rescale gravitational potentials
+        ! phi here is the Weyl potential (Phi+Psi)/2 in CAMB convention
+        ! mu modifies Poisson: Psi -> mu*Psi, Sigma modifies lensing: (Phi+Psi) -> Sigma*(Phi+Psi)
+        if (CP%MG%is_active) then
+            block
+                real(dl) :: Omega_DE_a, mu_mg, sigma_mg, phi_GR
+                Omega_DE_a = grhov_t / grho  ! approximate Omega_DE(a)
+                mu_mg = CP%MG%mu_of_a_k(a, k, Omega_DE_a)
+                sigma_mg = CP%MG%Sigma_of_a_k(a, k, Omega_DE_a)
+                ! In synchronous gauge, phi is the Weyl potential
+                ! Rescale: phi -> Sigma * phi_GR (for lensing potential)
+                phi_GR = phi
+                phi = sigma_mg * phi_GR
+            end block
+        end if
+
         if (associated(EV%OutputTransfer)) then
             EV%OutputTransfer(Transfer_kh) = k/(State%CP%h0/100._dl)
             EV%OutputTransfer(Transfer_cdm) = clxc
@@ -2707,6 +2910,17 @@
             EV%OutputTransfer(Transfer_Newt_vel_cdm)=  -k*sigma/adotoa
             EV%OutputTransfer(Transfer_Newt_vel_baryon) = -k*(vb + sigma)/adotoa
             EV%OutputTransfer(Transfer_vel_baryon_cdm) = vb
+            ! DM-DR transfer functions
+            if (.not. EV%is_standard_cdm .and. EV%dm_ix > 0) then
+                EV%OutputTransfer(Transfer_dm_dr) = ay(EV%dm_ix)
+            else
+                EV%OutputTransfer(Transfer_dm_dr) = 0
+            end if
+            if (.not. EV%is_standard_cdm .and. EV%dr_ix > 0) then
+                EV%OutputTransfer(Transfer_dark_rad) = ay(EV%dr_ix)
+            else
+                EV%OutputTransfer(Transfer_dark_rad) = 0
+            end if
             if (State%CP%do21cm) then
                 Tspin = State%CP%Recomb%T_s(a)
                 xe = State%CP%Recomb%x_e(a)

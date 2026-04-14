@@ -4,6 +4,8 @@
     use SourceWindows
     use constants, only : COBE_CMBTemp, default_nnu
     use DarkEnergyInterface
+    use DarkMatterInteraction
+    use MuSigmaMG
     use MassiveNu
     use config
     use iso_c_binding
@@ -151,9 +153,11 @@
         class(TRecombinationModel), allocatable :: Recomb
         class(TReionizationModel), allocatable :: Reion
         class(TDarkEnergyModel), allocatable :: DarkEnergy
+        class(TDarkMatterModel), allocatable :: DarkMatter
         class(TNonLinearModel), allocatable :: NonLinearModel
         type(AccuracyParams)     :: Accuracy
         type(SourceTermParams)   :: SourceTerms
+        type(TMuSigmaMG)         :: MG  ! Modified gravity mu-Sigma parameters
 
         real(dl), allocatable :: z_outputs(:) !Redshifts to output background outputs
 

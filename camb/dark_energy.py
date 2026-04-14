@@ -235,5 +235,59 @@ class EarlyQuintessence(Quintessence):
             self.fde_zc = fde_zc
 
 
+@fortran_class
+class InteractingDE(DarkEnergyEqnOfState):
+    """
+    Interacting Dark Energy model with DM-DE energy-momentum exchange.
+
+    Dark energy and dark matter exchange energy: Q_mu.
+    Background: rho_c' + 3H*rho_c = Q, rho_de' + 3(1+w)H*rho_de = -Q
+
+    Interaction types:
+        1: Q = xi * H * rho_de
+        2: Q = xi * H * rho_c
+        3: Q = xi * H * (rho_c + rho_de)
+
+    References: Valiviita+ 2008, Costa+ 2017, IDECAMB (arXiv:2306.01593).
+    """
+
+    # Cannot add _fields_ here because DarkEnergyEqnOfState has unmapped
+    # TCubicSpline fields in Fortran (same issue as DarkEnergyPPF).
+    # Parameters are pushed to Fortran via SetIDEParams method instead.
+    # IMPORTANT: Use set_params() to set IDE parameters (not individual attributes),
+    # because pars.DarkEnergy returns a new Python wrapper each time.
+
+    _fortran_class_module_ = "InteractingDE"
+    _fortran_class_name_ = "TInteractingDE"
+
+    _methods_ = (("SetIDEParams", [POINTER(c_double), POINTER(c_int), POINTER(c_double)]),)
+
+    def set_params(self, w=-1.0, wa=0, xi_ide=0.0, interaction_type=1,
+                   cs2_ide=1.0, **kwargs):
+        """
+        Set interacting DE parameters. Must be called as a single method
+        (not via individual attribute assignment).
+
+        :param w: w(0) equation of state
+        :param wa: -dw/da(0)
+        :param xi_ide: DM-DE coupling strength
+        :param interaction_type: Q kernel type (1=xi*H*rho_de, 2=xi*H*rho_c, 3=xi*H*(rho_c+rho_de))
+        :param cs2_ide: DE rest-frame sound speed squared
+        """
+        self.w = w
+        self.wa = wa
+        if interaction_type not in (1, 2, 3):
+            raise CAMBError("interaction_type must be 1, 2, or 3")
+        self.f_SetIDEParams(
+            byref(c_double(float(xi_ide))),
+            byref(c_int(int(interaction_type))),
+            byref(c_double(float(cs2_ide))),
+        )
+
+
 # short names for models that support w/wa
-F2003Class._class_names.update({"fluid": DarkEnergyFluid, "ppf": DarkEnergyPPF})
+F2003Class._class_names.update({
+    "fluid": DarkEnergyFluid,
+    "ppf": DarkEnergyPPF,
+    "interacting_de": InteractingDE,
+})

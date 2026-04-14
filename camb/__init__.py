@@ -13,7 +13,7 @@ __version__ = "1.6.7"
 from . import baseconfig
 
 baseconfig.check_fortran_version(__version__)
-from . import dark_energy, initialpower, model, nonlinear, reionization
+from . import dark_energy, dark_matter, initialpower, model, nonlinear, reionization
 from ._config import config
 from .baseconfig import (
     Array1D,
@@ -38,7 +38,11 @@ from .camb import (
     set_params,
     set_params_cosmomc,
 )
-from .dark_energy import DarkEnergyFluid, DarkEnergyPPF
+from .dark_energy import DarkEnergyFluid, DarkEnergyPPF, InteractingDE
+from .dark_matter import (
+    DMBaryonScattering, DMDR_ETHOS, DecayingDM,
+    DMNeutrinoScattering, WarmDM, FuzzyDM,
+)
 from .initialpower import InitialPowerLaw, SplinedInitialPower
 from .mathutils import threej
 from .model import CAMBparams, TransferParams

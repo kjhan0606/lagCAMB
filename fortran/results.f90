@@ -175,6 +175,8 @@
         !     dtaurec - dtau during recombination
         !     adotrad - a(tau) in radiation era
         real(dl) grhocrit,grhog,grhor,grhob,grhoc,grhov,grhornomass,grhok
+        real(dl) grhodmdr    ! interacting DM density (DM-DR coupled fraction): 8*pi*G*rho_dmdr*a^2 at a=1
+        real(dl) grhodr      ! dark radiation density: 8*pi*G*rho_dr*a^2 at a=1
         real(dl) taurst,dtaurec,taurend,tau_maxvis,adotrad
 
         real(dl) Omega_de
@@ -459,12 +461,22 @@
         this%grhoc=this%grhocrit*this%CP%omch2/h2
         this%grhob=this%grhocrit*this%CP%ombh2/h2
         this%grhok=this%grhocrit*this%CP%omk
+
+        ! Interacting dark matter - dark radiation densities
+        this%grhodmdr = 0._dl
+        this%grhodr = 0._dl
+        if (allocated(this%CP%DarkMatter)) then
+            call this%CP%DarkMatter%SetBackgroundDensities( &
+                this%grhocrit, this%grhor, h2, this%grhodmdr, this%grhodr)
+        end if
         this%Omega_de = 1 -(this%CP%omch2 + this%CP%ombh2 + this%CP%omnuh2)/h2 - this%CP%omk  &
-            - (this%grhornomass + this%grhog)/this%grhocrit
+            - (this%grhornomass + this%grhog)/this%grhocrit &
+            - this%grhodmdr/this%grhocrit - this%grhodr/this%grhocrit
         this%grhov=this%grhocrit*this%Omega_de
 
         !  adotrad gives da/dtau in the asymptotic radiation-dominated era:
-        this%adotrad = sqrt((this%grhog+this%grhornomass+sum(this%grhormass(1:this%CP%Nu_mass_eigenstates)))/3)
+        this%adotrad = sqrt((this%grhog+this%grhornomass+sum(this%grhormass(1:this%CP%Nu_mass_eigenstates)) &
+            +this%grhodr)/3)
 
         this%Nnow = this%CP%ombh2/h2*(1-this%CP%yhe)*this%grhocrit*c**2/kappa/m_H/Mpc**2
 
@@ -495,6 +507,10 @@
             this%nu_masses = 0
         end if
         call this%CP%DarkEnergy%Init(this)
+        if (allocated(this%CP%DarkMatter)) then
+            call this%CP%DarkMatter%Init(this)
+        end if
+        call this%CP%MG%Init()
         if (global_error_flag==0) this%tau0=this%TimeOfz(0._dl)
         if (global_error_flag==0) then
             this%chi0=this%rofChi(this%tau0/this%curvature_radius)
@@ -1237,6 +1253,9 @@
             grhoa2 = grhoa2 + rhonu * this%grhormass(nu_i)
         end do
     end if
+
+    ! Add interacting DM (matter-like, ~a^-3) and dark radiation (~a^-4)
+    grhoa2 = grhoa2 + this%grhodmdr * a + this%grhodr
 
     end function grho_no_de
 
@@ -3054,18 +3073,22 @@
     ! total perturbations with and without neutrinos, with neutrinos+dark energy in the numerator
         Transfer_Weyl = 10, & ! the Weyl potential, for lensing and ISW
         Transfer_Newt_vel_cdm=11, Transfer_Newt_vel_baryon=12,   & ! -k v_Newtonian/H
-        Transfer_vel_baryon_cdm = 13 !relative velocity of baryons and CDM
+        Transfer_vel_baryon_cdm = 13, & !relative velocity of baryons and CDM
+        Transfer_dm_dr = 14, & !interacting DM (DM-DR coupled) density perturbation
+        Transfer_dark_rad = 15 !dark radiation density perturbation
     !Sources
     !Alternatively for 21cm
     integer, parameter :: Transfer_monopole=4, Transfer_vnewt=5, Transfer_Tmat = 6
 
-    integer, parameter :: Transfer_max = Transfer_vel_baryon_cdm
+    integer, parameter :: Transfer_max = Transfer_dark_rad
     character(LEN=name_tag_len) :: Transfer_name_tags(Transfer_max-1) = &
         ['CDM     ', 'baryon  ', 'photon  ', 'nu      ', 'mass_nu ', 'total   ', &
-        'no_nu   ', 'total_de', 'Weyl    ', 'v_CDM   ', 'v_b     ', 'v_b-v_c ']
+        'no_nu   ', 'total_de', 'Weyl    ', 'v_CDM   ', 'v_b     ', 'v_b-v_c ', &
+        'dm_dr   ', 'dark_rad']
     character(LEN=name_tag_len) :: Transfer21cm_name_tags(Transfer_max-1) = &
         ['CDM      ', 'baryon   ', 'photon   ', 'monopole ', 'v_newt   ', 'delta_T_g', &
-        'no_nu    ', 'total_de ', 'Weyl     ', 'v_CDM    ', 'v_b      ', 'v_b-v_c  ']
+        'no_nu    ', 'total_de ', 'Weyl     ', 'v_CDM    ', 'v_b      ', 'v_b-v_c  ', &
+        'dm_dr    ', 'dark_rad ']
 
     logical :: transfer_interp_matterpower  = .true. !output regular grid in log k
     !set to false to output calculated values for later interpolation

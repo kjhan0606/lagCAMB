@@ -26,6 +26,7 @@ from .baseconfig import (
     numpy_1d_int,
 )
 from .dark_energy import DarkEnergyEqnOfState, DarkEnergyModel
+from .dark_matter import DarkMatterModel
 from .initialpower import InitialPower, SplinedInitialPower
 from .nonlinear import NonLinearModel
 from .recombination import RecombinationModel
@@ -52,7 +53,9 @@ Transfer_Weyl = 10
 Transfer_Newt_vel_cdm = 11
 Transfer_Newt_vel_baryon = 12
 Transfer_vel_baryon_cdm = 13
-Transfer_max = Transfer_vel_baryon_cdm
+Transfer_dm_dr = 14
+Transfer_dark_rad = 15
+Transfer_max = Transfer_dark_rad
 
 # for 21cm case
 Transfer_monopole = 4
@@ -95,6 +98,8 @@ transfer_names = [
     "v_newtonian_cdm",
     "v_newtonian_baryon",
     "v_baryon_cdm",
+    "delta_dm_dr",
+    "delta_dark_rad",
 ]
 
 evolve_names = transfer_names + [
@@ -262,6 +267,31 @@ class CustomSources(CAMB_Structure):
     )
 
 
+class MuSigmaMGParams(CAMB_Structure):
+    """
+    Phenomenological Modified Gravity parameters (mu-Sigma parameterization).
+
+    Modifies the Poisson and lensing potential equations:
+        k^2 Psi = -4*pi*G * mu(a,k) * a^2 * rho * Delta
+        k^2 (Phi + Psi) = -8*pi*G * Sigma(a,k) * a^2 * rho * Delta
+
+    In GR: mu = Sigma = 1. Set mu_0=Sigma_0=0 for standard gravity.
+
+    Parameterization: mu(a) = 1 + mu_0 * Omega_DE(a), Sigma(a) = 1 + Sigma_0 * Omega_DE(a)
+    Optional scale dependence via lambda_mu, lambda_sigma [Mpc].
+    """
+
+    _fields_ = (
+        ("is_active", c_bool, "Whether modified gravity is active"),
+        ("mu_0", c_double, "mu deviation amplitude (0 = GR)"),
+        ("sigma_0", c_double, "Sigma deviation amplitude (0 = GR)"),
+        ("lambda_mu", c_double, "mu scale-dependence [Mpc] (0 = scale-independent)"),
+        ("lambda_sigma", c_double, "Sigma scale-dependence [Mpc] (0 = scale-independent)"),
+        ("c1", c_double, "mu k-dependence coefficient"),
+        ("c2", c_double, "Sigma k-dependence coefficient"),
+    )
+
+
 @fortran_class
 class CAMBparams(F2003Class):
     """
@@ -339,9 +369,11 @@ class CAMBparams(F2003Class):
         ("Recomb", AllocatableObject(recomb.RecombinationModel)),
         ("Reion", AllocatableObject(reion.ReionizationModel)),
         ("DarkEnergy", AllocatableObject(DarkEnergyModel)),
+        ("DarkMatter", AllocatableObject(DarkMatterModel)),
         ("NonLinearModel", AllocatableObject(NonLinearModel)),
         ("Accuracy", AccuracyParams),
         ("SourceTerms", SourceTermParams),
+        ("MG", MuSigmaMGParams),
         ("z_outputs", AllocatableArrayDouble, "redshifts to always calculate BAO output parameters"),
         (
             "scalar_initial_condition",

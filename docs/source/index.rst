@@ -70,6 +70,7 @@ Other modules:
 
    bbn
    dark_energy
+   dark_matter
    initialpower
    nonlinear
    reionization

@@ -295,6 +295,74 @@ Practical Usage Notes
 * Remember that CAMB's "synchronous gauge" is specifically the CDM frame
 * Anisotropic stress components (:math:`\pi_g`, :math:`\pi_r`, :math:`\pi_{\nu}`) and total anisotropic stress :math:`\Pi` are gauge-invariant
 
+Nonstandard Cosmology Variables
+--------------------------------
+
+lagCAMB extends CAMB with additional perturbation variables for nonstandard dark sector models.
+These variables are allocated dynamically in ``equations.f90`` via ``SetupScalarArrayIndices``.
+
+.. list-table:: **Dark Matter Model Variables**
+   :widths: 20 20 60
+   :header-rows: 1
+
+   * - Index
+     - CAMB Variable
+     - Description
+   * - ``EV%vc_ix``
+     - CDM velocity
+     - CDM velocity perturbation :math:`v_c`, allocated when DM model has ``has_cdm_velocity=.true.`` (e.g. DM-baryon, DM-neutrino scattering)
+   * - ``EV%dm_ix``
+     - DM extra density
+     - Extra DM density equation (e.g. daughter DM in decaying models, axion density in fuzzy DM)
+   * - ``EV%dr_ix``
+     - DR hierarchy start
+     - First index of dark radiation Boltzmann hierarchy :math:`F_0, F_1, \ldots, F_{l_\max}` (used in decaying DM, ETHOS)
+
+.. list-table:: **Dark Energy Model Variables**
+   :widths: 20 20 60
+   :header-rows: 1
+
+   * - Index
+     - CAMB Variable
+     - Description
+   * - ``EV%w_ix``
+     - DE perturbation start
+     - First index of dark energy perturbation variables: :math:`\delta_{de}` (at ``w_ix``) and :math:`(1+w)v_{de}` (at ``w_ix+1``) for fluid models
+   * -
+     -
+     - For InteractingDE, the interaction source terms (coupling CDM and DE perturbations) are added in ``equations.f90`` after the standard evolution
+
+**InteractingDE perturbation equations** (type 1: :math:`Q = \xi H \rho_{de}`):
+
+.. math::
+
+   \dot{\delta}_c = -kz + \xi \mathcal{H} \frac{\rho_{de}}{\rho_c}(\delta_{de} - \delta_c)
+
+.. math::
+
+   \dot{\delta}_{de} = -(1+w)(k v_{de} + kz) - 3\mathcal{H}(c_s^2 - w)\delta_{de} + \xi\mathcal{H}(\delta_c - \delta_{de})
+
+**DecayingDM** dark radiation hierarchy:
+
+.. math::
+
+   \dot{F}_0 = -k F_1 + \Gamma_{\mathrm{conf}} a \cdot S_0
+
+.. math::
+
+   \dot{F}_l = \frac{k}{2l+1}[l F_{l-1} - (l+1) F_{l+1}] \quad (l \geq 2)
+
+where :math:`\Gamma_{\mathrm{conf}} = \Gamma_{\mathrm{dcdm}} \times 1000/c` converts from km/s/Mpc to Mpc\ :math:`^{-1}`.
+
+**DM-Neutrino scattering** collision terms:
+
+.. math::
+
+   \dot{F}_{l,\nu} \mathrel{+}= -R_\nu F_{l,\nu} \quad (l \geq 2), \qquad
+   \dot{q}_\nu \mathrel{+}= R_\nu(4v_c - q_\nu)
+
+where :math:`R_\nu` is the neutrino collision rate from the DM-neutrino cross section.
+
 Cross-References
 ----------------
 

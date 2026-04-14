@@ -5,8 +5,9 @@
 POWERSPECTRUM_FILES ?= InitialPower
 REIONIZATION_FILES ?= reionization
 RECOMBINATION_FILES ?= recfast
-NONLINEAR_FILES     ?= halofit SecondOrderPK ExternalNonLinearRatio
-DARKENERGY_FILES  ?= DarkEnergyFluid DarkEnergyPPF PowellMinimize DarkEnergyQuintessence
+NONLINEAR_FILES     ?= halofit SecondOrderPK ExternalNonLinearRatio halofit_sidm
+DARKENERGY_FILES  ?= DarkEnergyFluid DarkEnergyPPF PowellMinimize DarkEnergyQuintessence InteractingDE
+DARKMATTER_FILES  ?= DMBaryon DMDR_ETHOS DecayingDM DMNeutrino WarmDM FuzzyDM
 
 BISPECTRUM ?= SeparableBispectrum
 
@@ -29,8 +30,8 @@ DLL_DIR ?= Releaselib
 CAMBLIB       = libcamb.a
 
 SOURCEFILES      = constants config classes MathUtils subroutines DarkAge21cm \
-        DarkEnergyInterface SourceWindows massive_neutrinos model results bessels \
-        $(RECOMBINATION_FILES) $(DARKENERGY_FILES) equations \
+        DarkEnergyInterface DarkMatterInteraction MuSigmaMG SourceWindows massive_neutrinos model results bessels \
+        $(RECOMBINATION_FILES) $(DARKENERGY_FILES) $(DARKMATTER_FILES) equations \
         $(REIONIZATION_FILES) $(POWERSPECTRUM_FILES) $(NONLINEAR_FILES) \
         lensing $(BISPECTRUM) cmbmain camb camb_python
 

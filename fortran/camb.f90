@@ -9,6 +9,9 @@
     use Recombination, only : TRecFast
     use lensing
     use DarkEnergyFluid
+    use DMBaryon
+    use DMDR_ETHOS
+    use NonLinear_SIDM
     implicit none
     contains
 

@@ -94,6 +94,39 @@ class Halofit(NonLinearModel):
 
 
 @fortran_class
+class SIDMHalofit(Halofit):
+    """
+    Modified HMcode for Self-Interacting Dark Matter (SIDM).
+
+    Applies SIDM corrections on top of standard HMcode/halofit:
+    reduced halo concentration and core formation suppress small-scale power (k > 1 h/Mpc).
+    """
+
+    _fields_ = (
+        ("sigma_over_m", c_double, "Self-interaction cross section / DM mass [cm^2/g]"),
+        ("v_dep_power", c_double, "Velocity dependence power: sigma(v) = sigma_0 * (v/v0)^alpha"),
+        ("v_dep_v0", c_double, "Reference velocity for velocity dependence [km/s]"),
+    )
+
+    _fortran_class_module_ = "NonLinear_SIDM"
+    _fortran_class_name_ = "TSIDMHalofit"
+
+    def set_params(self, sigma_over_m=0.0, v_dep_power=0.0, v_dep_v0=100.0, **kwargs):
+        """
+        Set SIDM halofit parameters.
+
+        :param sigma_over_m: self-interaction cross section / DM mass [cm^2/g]
+        :param v_dep_power: velocity dependence power (sigma ~ v^alpha)
+        :param v_dep_v0: reference velocity [km/s]
+        :param kwargs: passed to Halofit.set_params (halofit_version, HMCode params)
+        """
+        super().set_params(**kwargs)
+        self.sigma_over_m = sigma_over_m
+        self.v_dep_power = v_dep_power
+        self.v_dep_v0 = v_dep_v0
+
+
+@fortran_class
 class SecondOrderPK(NonLinearModel):
     """
     Third-order Newtonian perturbation theory results for the non-linear correction.

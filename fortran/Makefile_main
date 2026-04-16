@@ -6,8 +6,8 @@ POWERSPECTRUM_FILES ?= InitialPower
 REIONIZATION_FILES ?= reionization
 RECOMBINATION_FILES ?= recfast
 NONLINEAR_FILES     ?= halofit SecondOrderPK ExternalNonLinearRatio halofit_sidm
-DARKENERGY_FILES  ?= DarkEnergyFluid DarkEnergyPPF PowellMinimize DarkEnergyQuintessence InteractingDE FuzzyDMField
-DARKMATTER_FILES  ?= DMBaryon DMDR_ETHOS DecayingDM DMNeutrino WarmDM FuzzyDM
+DARKENERGY_FILES  ?= DarkEnergyFluid DarkEnergyPPF PowellMinimize DarkEnergyQuintessence InteractingDE FuzzyDMField HorndeskiDE
+DARKMATTER_FILES  ?= DMBaryon DMDR_ETHOS DecayingDM DMNeutrino DMPhoton MultiInteractingDM WarmDM FuzzyDM
 
 BISPECTRUM ?= SeparableBispectrum
 

@@ -16,4 +16,7 @@ Input parameter model
 .. autoclass:: camb.model.SourceTermParams
    :members:
 
+.. autoclass:: camb.model.MuSigmaMGParams
+   :members:
+
 .. autoclass:: camb.model.CustomSources

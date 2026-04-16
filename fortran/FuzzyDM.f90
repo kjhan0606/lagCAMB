@@ -250,12 +250,13 @@
     end subroutine TFuzzyDM_PerturbationInitial
 
     subroutine TFuzzyDM_PerturbationEvolve(this, ayprime, a, adotoa, k, z, y, &
-        dm_ix, dr_ix, vc_ix, clxc, vb, grhoc_t, grhob_t, sigma)
+        dm_ix, dr_ix, vc_ix, clxc, vb, grhoc_t, grhob_t, sigma, high_ktau_dr)
     class(TFuzzyDM), intent(in) :: this
     real(dl), intent(inout) :: ayprime(:)
     real(dl), intent(in) :: a, adotoa, k, z, y(:)
     integer, intent(in) :: dm_ix, dr_ix, vc_ix
     real(dl), intent(in) :: clxc, vb, grhoc_t, grhob_t, sigma
+    logical, intent(in), optional :: high_ktau_dr
     real(dl) :: cs2, delta_ax, v_ax, k_J
 
     if (this%is_standard_cdm) return

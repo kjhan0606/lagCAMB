@@ -376,6 +376,14 @@
 
     if (.not. calling_again) then
         this%ThermoData%HasThermoData = .false.
+        ! Allow DarkMatter model to register as neutrino species (e.g. WDM Boltzmann mode)
+        if (allocated(this%CP%DarkMatter)) then
+            call this%CP%DarkMatter%ModifyNeutrinoParams(max_nu, &
+                this%CP%Nu_mass_eigenstates, this%CP%Nu_mass_degeneracies, &
+                this%CP%Nu_mass_fractions, this%CP%Nu_mass_numbers, &
+                this%CP%Num_Nu_Massive, this%CP%Num_Nu_Massless, &
+                this%CP%omnuh2, this%CP%omch2, this%CP%H0)
+        end if
         if (this%CP%Num_Nu_Massive /= sum(this%CP%Nu_mass_numbers(1:this%CP%Nu_mass_eigenstates))) then
             if (sum(this%CP%Nu_mass_numbers(1:this%CP%Nu_mass_eigenstates))/=0) &
                 call GlobalError('Num_Nu_Massive is not sum of Nu_mass_numbers', error_unsupported_params)
@@ -493,8 +501,15 @@
             call this%NuPerturbations%Init(P%Accuracy%AccuracyBoost*P%Accuracy%neutrino_q_boost)
             !  nu_masses=m_nu(i)*c**2/(k_B*T_nu0)
             do nu_i=1, this%CP%Nu_mass_eigenstates
-                this%nu_masses(nu_i)= ThermalNuBackground%find_nu_mass_for_rho(this%CP%omnuh2/h2*this%CP%Nu_mass_fractions(nu_i)&
-                    *this%grhocrit/this%grhormass(nu_i))
+                if (CustomNuPSD(nu_i)%active) then
+                    call CustomNuPSD(nu_i)%Init(this%NuPerturbations%nu_q, &
+                        this%NuPerturbations%nu_int_kernel, this%NuPerturbations%nqmax)
+                    this%nu_masses(nu_i)= CustomNuPSD(nu_i)%find_nu_mass_for_rho( &
+                        this%CP%omnuh2/h2*this%CP%Nu_mass_fractions(nu_i)*this%grhocrit/this%grhormass(nu_i))
+                else
+                    this%nu_masses(nu_i)= ThermalNuBackground%find_nu_mass_for_rho(this%CP%omnuh2/h2*this%CP%Nu_mass_fractions(nu_i)&
+                        *this%grhocrit/this%grhormass(nu_i))
+                end if
             end do
             if (all(this%nu_masses(1:this%CP%Nu_mass_eigenstates)==0)) then
                 !All density accounted for by massless, so just use massless
@@ -970,7 +985,11 @@
         if (this%CP%Num_Nu_massive /= 0) then
             !Get massive neutrino density relative to massless
             do nu_i = 1, this%CP%nu_mass_eigenstates
-                call ThermalNuBackground%rho(a * this%nu_masses(nu_i), rhonu)
+                if (CustomNuPSD(nu_i)%active) then
+                    call CustomNuPSD(nu_i)%rho(a * this%nu_masses(nu_i), rhonu)
+                else
+                    call ThermalNuBackground%rho(a * this%nu_masses(nu_i), rhonu)
+                end if
                 grhonu = grhonu + rhonu * this%grhormass(nu_i)
             end do
         end if
@@ -1249,7 +1268,11 @@
     if (this%CP%Num_Nu_massive /= 0) then
         !Get massive neutrino density relative to massless
         do nu_i = 1, this%CP%nu_mass_eigenstates
-            call ThermalNuBack%rho(a * this%nu_masses(nu_i), rhonu)
+            if (CustomNuPSD(nu_i)%active) then
+                call CustomNuPSD(nu_i)%rho(a * this%nu_masses(nu_i), rhonu)
+            else
+                call ThermalNuBack%rho(a * this%nu_masses(nu_i), rhonu)
+            end if
             grhoa2 = grhoa2 + rhonu * this%grhormass(nu_i)
         end do
     end if

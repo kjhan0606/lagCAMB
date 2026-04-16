@@ -116,6 +116,9 @@
         !True when truncating at l=2,3 when k*tau>>1 (see arXiv:1104.2933)
         logical high_ktau_neutrino_approx
 
+        !True when using UFA for dark radiation hierarchy (mirrors neutrino UFA)
+        logical high_ktau_dr_approx
+
         !Massive neutrino scheme being used at the moment
         integer NuMethod
 
@@ -258,6 +261,7 @@
     real(dl) cs2, opacity, dopacity
     real(dl) tau_switch_ktau, tau_switch_nu_massless, tau_switch_nu_massive, next_switch
     real(dl) tau_switch_no_nu_multpoles, tau_switch_no_phot_multpoles,tau_switch_nu_nonrel
+    real(dl) tau_switch_dr_ufa
     real(dl) noSwitch, smallTime
     !Sources
     real(dl) tau_switch_saha, Delta_TM, xe,a,tau_switch_evolve_TM
@@ -286,6 +290,15 @@
         tau_switch_ktau=  max(20, EV%lmaxnr-4)/EV%k_buf
     end if
 
+    !DR UFA switch: truncate dark radiation hierarchy when k*tau >> 1
+    tau_switch_dr_ufa = noSwitch
+    if (.not. EV%high_ktau_dr_approx .and. .not. EV%is_standard_cdm &
+        .and. allocated(CP%DarkMatter)) then
+        if (CP%DarkMatter%num_dr_equations > 4) then
+            tau_switch_dr_ufa = max(20, CP%DarkMatter%num_dr_equations - 5) / EV%k_buf
+        end if
+    end if
+
     if (CP%Num_Nu_massive /= 0) then
         do nu_i = 1, CP%Nu_mass_eigenstates
             if (EV%nq(nu_i) /= State%NuPerturbations%nqmax) then
@@ -309,7 +322,7 @@
 
     next_switch = min(tau_switch_ktau, tau_switch_nu_massless,EV%TightSwitchoffTime, tau_switch_nu_massive, &
         tau_switch_no_nu_multpoles, tau_switch_no_phot_multpoles, tau_switch_nu_nonrel, noSwitch, &
-        tau_switch_saha, tau_switch_evolve_TM)
+        tau_switch_saha, tau_switch_evolve_TM, tau_switch_dr_ufa)
 
     if (next_switch < tauend) then
         if (next_switch > tau+smallTime) then
@@ -353,6 +366,13 @@
             !k tau >> 1, evolve massless neutrino effective fluid up to l=2
             EVout%high_ktau_neutrino_approx=.true.
             EVout%nq(1:CP%Nu_mass_eigenstates) = State%NuPerturbations%nqmax
+            call SetupScalarArrayIndices(EVout)
+            call CopyScalarVariableArray(y,yout, EV, EVout)
+            y=yout
+            EV=EVout
+        else if (next_switch==tau_switch_dr_ufa) then
+            !k tau >> 1, truncate dark radiation hierarchy to UFA (F_0, F_1, F_2)
+            EVout%high_ktau_dr_approx=.true.
             call SetupScalarArrayIndices(EVout)
             call CopyScalarVariableArray(y,yout, EV, EVout)
             y=yout
@@ -618,7 +638,11 @@
                 maxeq = maxeq + 1
                 ! DR Boltzmann hierarchy
                 EV%dr_ix = neq + 1
-                neq = neq + CP%DarkMatter%num_dr_equations
+                if (EV%high_ktau_dr_approx) then
+                    neq = neq + 3  ! UFA: F_0, F_1, F_2 only
+                else
+                    neq = neq + CP%DarkMatter%num_dr_equations
+                end if
                 maxeq = maxeq + CP%DarkMatter%num_dr_equations
             end if
         end if
@@ -691,8 +715,12 @@
         if (EV%vc_ix > 0 .and. EVout%vc_ix > 0) yout(EVout%vc_ix) = y(EV%vc_ix)
         if (EV%dm_ix > 0 .and. EVout%dm_ix > 0) yout(EVout%dm_ix) = y(EV%dm_ix)
         if (EV%dr_ix > 0 .and. EVout%dr_ix > 0 .and. allocated(CP%DarkMatter)) then
-            lmax = CP%DarkMatter%num_dr_equations
-            if (lmax > 0) yout(EVout%dr_ix:EVout%dr_ix+lmax-1) = y(EV%dr_ix:EV%dr_ix+lmax-1)
+            if (EV%high_ktau_dr_approx .or. EVout%high_ktau_dr_approx) then
+                lmax = 2  ! UFA: copy only F_0, F_1, F_2
+            else
+                lmax = CP%DarkMatter%num_dr_equations - 1
+            end if
+            yout(EVout%dr_ix:EVout%dr_ix+lmax) = y(EV%dr_ix:EV%dr_ix+lmax)
         end if
     end if
 
@@ -887,6 +915,7 @@
     end if
 
     EV%high_ktau_neutrino_approx = .false.
+    EV%high_ktau_dr_approx = .false.
     if (CP%WantScalars) then
         EV%TightCoupling=.true.
         EV%no_phot_multpoles =.false.
@@ -1027,8 +1056,12 @@
     call SetupScalarArrayIndices(EVout)
     call CopyScalarVariableArray(y,yout, EV, EVout)
 
-    !Get density and pressure as ratio to massles by interpolation from table
-    call ThermalNuBack%rho_P(a*State%nu_masses(nu_i),rhonu,pnu)
+    !Get density and pressure as ratio to massless by interpolation from table
+    if (CustomNuPSD(nu_i)%active) then
+        call CustomNuPSD(nu_i)%rho_P(a*State%nu_masses(nu_i),rhonu,pnu)
+    else
+        call ThermalNuBack%rho_P(a*State%nu_masses(nu_i),rhonu,pnu)
+    end if
 
     !Integrate over q
     call Nu_Integrate_L012(EV, y, a, nu_i, clxnu,qnu,dpnu,pinu)
@@ -1039,14 +1072,21 @@
     pinu=pinu/rhonu
 
     yout(EVout%nu_ix(nu_i))=clxnu
-    yout(EVout%nu_ix(nu_i)+1)=dpnu
     yout(EVout%nu_ix(nu_i)+2)=qnu
     yout(EVout%nu_ix(nu_i)+3)=pinu
 
-    call Nu_Intvsq(EV,y, a, nu_i, EVout%G11(nu_i),EVout%G30(nu_i))
-    !Analytic solution for higher moments, proportional to a^{-3}
-    EVout%G11(nu_i)=EVout%G11(nu_i)*a2*a/rhonu
-    EVout%G30(nu_i)=EVout%G30(nu_i)*a2*a/rhonu
+    if (CP%Accuracy%NuApproxMethod == 1) then
+        !CLASS-style UFA: dp = c_g^2*clx, no G11/G30 needed
+        yout(EVout%nu_ix(nu_i)+1) = 0._dl
+        EVout%G11(nu_i) = 0._dl
+        EVout%G30(nu_i) = 0._dl
+    else
+        yout(EVout%nu_ix(nu_i)+1)=dpnu
+        call Nu_Intvsq(EV,y, a, nu_i, EVout%G11(nu_i),EVout%G30(nu_i))
+        !Analytic solution for higher moments, proportional to a^{-3}
+        EVout%G11(nu_i)=EVout%G11(nu_i)*a2*a/rhonu
+        EVout%G30(nu_i)=EVout%G30(nu_i)*a2*a/rhonu
+    end if
 
     EV=EVout
     y=yout
@@ -1077,7 +1117,11 @@
         grhormass_t=State%grhormass(nu_i)/a**2
 
         !Get density and pressure as ratio to massless by interpolation from table
-        call ThermalNuBack%rho_P(a*State%nu_masses(nu_i),rhonu,pnu)
+        if (CustomNuPSD(nu_i)%active) then
+            call CustomNuPSD(nu_i)%rho_P(a*State%nu_masses(nu_i),rhonu,pnu)
+        else
+            call ThermalNuBack%rho_P(a*State%nu_masses(nu_i),rhonu,pnu)
+        end if
 
         if (EV%MassiveNuApprox(nu_i)) then
             clxnu=y(EV%nu_ix(nu_i))
@@ -1093,7 +1137,11 @@
             qnu=qnu/rhonu
             clxnu = clxnu/rhonu
             pinu=pinu/rhonu
-            rhonudot = ThermalNuBack%drho(a*State%nu_masses(nu_i),adotoa)
+            if (CustomNuPSD(nu_i)%active) then
+                rhonudot = CustomNuPSD(nu_i)%drho(a*State%nu_masses(nu_i),adotoa)
+            else
+                rhonudot = ThermalNuBack%drho(a*State%nu_masses(nu_i),adotoa)
+            end if
 
             call Nu_pinudot(EV,y, yprime, a,adotoa, nu_i,pinudot)
             pinudot=pinudot/rhonu - rhonudot/rhonu*pinu
@@ -1129,8 +1177,14 @@
     real(dl), optional, intent(OUT) :: dpnu,pinu
     real(dl) tmp, am, aq,v, pert_scale
     integer iq, ind
+    real(dl), pointer :: kernel(:)
 
     !  q is the comoving momentum in units of k_B*T_nu0/c.
+    if (CustomNuPSD(nu_i)%active) then
+        kernel => CustomNuPSD(nu_i)%nu_int_kernel
+    else
+        kernel => State%NuPerturbations%nu_int_kernel
+    end if
 
     drhonu=0
     fnu=0
@@ -1140,15 +1194,15 @@
     end if
     am=a*State%nu_masses(nu_i)
     ind=EV%nu_ix(nu_i)
-    associate(nu_q=>State%NuPerturbations%nu_q, nu_int_kernel=>State%NuPerturbations%nu_int_kernel)
+    associate(nu_q=>State%NuPerturbations%nu_q)
         do iq=1,EV%nq(nu_i)
             aq=am/nu_q(iq)
             v=1._dl/sqrt(1._dl+aq*aq)
-            drhonu=drhonu+ nu_int_kernel(iq)* y(ind)/v
-            fnu=fnu+nu_int_kernel(iq)* y(ind+1)
+            drhonu=drhonu+ kernel(iq)* y(ind)/v
+            fnu=fnu+kernel(iq)* y(ind+1)
             if (present(dpnu)) then
-                dpnu=dpnu+  nu_int_kernel(iq)* y(ind)*v
-                pinu=pinu+ nu_int_kernel(iq)*y(ind+2)*v
+                dpnu=dpnu+  kernel(iq)* y(ind)*v
+                pinu=pinu+ kernel(iq)*y(ind+2)*v
             end if
             ind=ind+EV%lmaxnu_tau(nu_i)+1
         end do
@@ -1158,12 +1212,12 @@
             aq=am/nu_q(iq)
             v=1._dl/sqrt(1._dl+aq*aq)
             pert_scale=(State%nu_masses(nu_i)/nu_q(iq))**2/2
-            tmp = nu_int_kernel(iq)*(y(EV%r_ix)  + pert_scale*y(ind))
+            tmp = kernel(iq)*(y(EV%r_ix)  + pert_scale*y(ind))
             drhonu=drhonu+ tmp/v
-            fnu=fnu+nu_int_kernel(iq)*(y(EV%r_ix+1)+ pert_scale*y(ind+1))
+            fnu=fnu+kernel(iq)*(y(EV%r_ix+1)+ pert_scale*y(ind+1))
             if (present(dpnu)) then
                 dpnu=dpnu+ tmp*v
-                pinu = pinu+ nu_int_kernel(iq)*(y(EV%r_ix+2)+ pert_scale*y(ind+2))*v
+                pinu = pinu+ kernel(iq)*(y(EV%r_ix+2)+ pert_scale*y(ind+2))*v
             end if
         end do
     end associate
@@ -1185,6 +1239,13 @@
     real(dl) psi2,psi2dot
     real(dl) am, pert_scale
     integer iq,ind
+    real(dl), pointer :: kernel(:)
+
+    if (CustomNuPSD(nu_i)%active) then
+        kernel => CustomNuPSD(nu_i)%nu_int_kernel
+    else
+        kernel => State%NuPerturbations%nu_int_kernel
+    end if
 
     !  q is the comoving momentum in units of k_B*T_nu0/c.
     pinudot=0._dl
@@ -1196,7 +1257,7 @@
         aqdot=aq*adotoa
         v=1._dl/sqrt(1._dl+aq*aq)
         vdot=-aq*aqdot/(1._dl+aq*aq)**1.5d0
-        pinudot=pinudot+State%NuPerturbations%nu_int_kernel(iq)*(ydot(ind)*v+y(ind)*vdot)
+        pinudot=pinudot+kernel(iq)*(ydot(ind)*v+y(ind)*vdot)
         ind=ind+EV%lmaxnu_tau(nu_i)+1
     end do
     ind = EV%nu_pert_ix+2
@@ -1209,7 +1270,7 @@
         vdot=-aq*aqdot/(1._dl+aq*aq)**1.5d0
         psi2dot=ydot(EV%r_ix+2)  + pert_scale*ydot(ind)
         psi2=y(EV%r_ix+2)  + pert_scale*y(ind)
-        pinudot=pinudot+State%NuPerturbations%nu_int_kernel(iq)*(psi2dot*v+psi2*vdot)
+        pinudot=pinudot+kernel(iq)*(psi2dot*v+psi2*vdot)
     end do
 
     end subroutine Nu_pinudot
@@ -1222,6 +1283,13 @@
     real(dl) :: am
     real(dl) pinu,q,aq,v
     integer iq, ind
+    real(dl), pointer :: kernel(:)
+
+    if (CustomNuPSD(nu_i)%active) then
+        kernel => CustomNuPSD(nu_i)%nu_int_kernel
+    else
+        kernel => State%NuPerturbations%nu_int_kernel
+    end if
 
     if (EV%nq(nu_i)/=State%NuPerturbations%nqmax) call MpiStop('Nu_pi: nq/=nqmax')
     pinu=0
@@ -1231,7 +1299,7 @@
         q=State%NuPerturbations%nu_q(iq)
         aq=am/q
         v=1._dl/sqrt(1._dl+aq*aq)
-        pinu=pinu+State%NuPerturbations%nu_int_kernel(iq)*y(ind)*v
+        pinu=pinu+kernel(iq)*y(ind)*v
         ind =ind+EV%lmaxnut+1
     end do
 
@@ -1248,6 +1316,13 @@
     !by integrating over momentum.
     real(dl) aq,q,v, am
     integer iq, ind
+    real(dl), pointer :: kernel(:)
+
+    if (CustomNuPSD(nu_i)%active) then
+        kernel => CustomNuPSD(nu_i)%nu_int_kernel
+    else
+        kernel => State%NuPerturbations%nu_int_kernel
+    end if
 
     !  q is the comoving momentum in units of k_B*T_nu0/c.
     am=a*State%nu_masses(nu_i)
@@ -1259,9 +1334,9 @@
         q=State%NuPerturbations%nu_q(iq)
         aq=am/q
         v=1._dl/sqrt(1._dl+aq*aq)
-        G11=G11+State%NuPerturbations%nu_int_kernel(iq)*y(ind+1)*v**2
+        G11=G11+kernel(iq)*y(ind+1)*v**2
         if (EV%lmaxnu_tau(nu_i)>2) then
-            G30=G30+State%NuPerturbations%nu_int_kernel(iq)*y(ind+3)*v**2
+            G30=G30+kernel(iq)*y(ind+3)*v**2
         end if
         ind = ind+EV%lmaxnu_tau(nu_i)+1
     end do
@@ -1286,7 +1361,11 @@
         grhormass_t=State%grhormass(nu_i)/a**2
 
         !Get density and pressure as ratio to massless by interpolation from table
-        call ThermalNuBack%rho_P(a*State%nu_masses(nu_i),rhonu,pnu)
+        if (CustomNuPSD(nu_i)%active) then
+            call CustomNuPSD(nu_i)%rho_P(a*State%nu_masses(nu_i),rhonu,pnu)
+        else
+            call ThermalNuBack%rho_P(a*State%nu_masses(nu_i),rhonu,pnu)
+        end if
 
         if (EV%MassiveNuApprox(nu_i)) then
             clxnu=y(EV%nu_ix(nu_i))
@@ -2200,7 +2279,9 @@
     use MassiveNu
     use Recombination, only : CB1
     use DMNeutrino, only: TDMNeutrinoScattering
+    use DMPhoton, only: TDMPhotonScattering
     use InteractingDE, only: TInteractingDE, ide_Q_H_rho_de, ide_Q_H_rho_c, ide_Q_H_rho_tot
+    use HorndeskiDE, only: THorndeskiDE
     implicit none
     type(EvolutionVars) EV
     integer n,nu_i
@@ -2212,6 +2293,7 @@
         clxcdot,clxbdot,adotdota,gpres,clxrdot,etak
     real(dl) q,aq,v
     real(dl) G11_t,G30_t, wnu_arr(max_nu)
+    real(dl) am_nu, rhonu_ufa, pnu_ufa, ppnu_ufa, iv2nu_ufa, ppw, c_g2, dp_eff
 
     real(dl) dgq,grhob_t,grhor_t,grhoc_t,grhog_t,grhov_t,grhonu_t,sigma,polter
     real(dl) w_dark_energy_t !equation of state of dark energy
@@ -2236,6 +2318,7 @@
     real(dl) ddopacity, visibility, dvisibility, ddvisibility, exptau, lenswindow
     real(dl) ISW, quadrupole_source, doppler, monopole_source, tau0, ang_dist
     real(dl) dgrho_de, dgq_de, cs2_de
+    real(dl) mu_dot_gamma, opacity_total, R_dm_ph
 
     k=EV%k_buf
     k2=EV%k2_buf
@@ -2301,6 +2384,13 @@
         adotoa=sqrt((grho+State%grhok)/3._dl)
         cothxor=1._dl/State%tanfunc(tau/State%curvature_radius)/State%curvature_radius
     end if
+
+    ! DM-Photon scattering: extra photon opacity from DM
+    mu_dot_gamma = 0._dl
+    if (.not. EV%is_standard_cdm .and. allocated(CP%DarkMatter)) then
+        mu_dot_gamma = CP%DarkMatter%DragRate_Photon(a, adotoa, grhoc_t, grhog_t)
+    end if
+    opacity_total = opacity + mu_dot_gamma
 
     dgrho = dgrho_matter
 
@@ -2376,6 +2466,7 @@
     !  Get sigma (shear) and z from the constraints
     ! have to get z from eta for numerical stability
     z=(0.5_dl*dgrho/k + etak)/adotoa
+
     if (State%flat) then
         !eta*k equation
         sigma=(z+1.5_dl*dgq/k2)
@@ -2384,6 +2475,36 @@
         sigma=(z+1.5_dl*dgq/k2)/EV%Kf(1)
         ayprime(ix_etak)=0.5_dl*dgq + State%curv*z
     end if
+
+    ! Modified gravity: mu modifies Poisson equation -> affects matter growth via etak'
+    ! Extra source: Delta(etak') = -0.5*(mu-1)*dgrho_matter*adotoa/k
+    if (CP%MG%is_active) then
+        block
+            real(dl) :: mu_mg_val, Omega_DE_a_mg
+            Omega_DE_a_mg = grhov_t / grho
+            mu_mg_val = CP%MG%mu_of_a_k(a, k, Omega_DE_a_mg)
+            if (mu_mg_val /= 1._dl) then
+                ayprime(ix_etak) = ayprime(ix_etak) &
+                    - 0.5_dl*(mu_mg_val - 1._dl)*dgrho_matter*adotoa/k
+            end if
+        end block
+    end if
+
+    ! Horndeski QSA: mu modifies Poisson -> affects matter growth
+    select type(DE => State%CP%DarkEnergy)
+    type is (THorndeskiDE)
+        if (DE%horn_active) then
+            block
+                real(dl) :: mu_horn_val
+                mu_horn_val = DE%mu_of_a(a)
+                if (mu_horn_val /= 1._dl) then
+                    ayprime(ix_etak) = ayprime(ix_etak) &
+                        - 0.5_dl*(mu_horn_val - 1._dl)*dgrho_matter*adotoa/k
+                end if
+            end block
+        end if
+    end select
+
 
     if (.not. EV%is_cosmological_constant) &
         call State%CP%DarkEnergy%PerturbationEvolve(ayprime, w_dark_energy_t, &
@@ -2494,7 +2615,7 @@
 
         pig = 32._dl/45/opacity*k*(sigma+vb)
 
-        !  First-order approximation to baryon-photon splip
+        !  First-order approximation to baryon-photon slip
         slip = - (2*adotoa/(1+pb43) + dopacity/opacity)* (vb-3._dl/4*qg) &
             +(-adotdota*vb-k/2*adotoa*clxg +k*(cs2*clxbdot-clxgdot/4))/(opacity*(1+pb43))
 
@@ -2549,7 +2670,15 @@
     ! Evolve DM interaction equations (CDM velocity for DM-baryon, or full DM-DR system)
     if (.not. EV%is_standard_cdm .and. allocated(CP%DarkMatter)) then
         call CP%DarkMatter%PerturbationEvolve(ayprime, a, adotoa, k, z, ay, &
-            EV%dm_ix, EV%dr_ix, EV%vc_ix, clxc, vb, grhoc_t, grhob_t, sigma)
+            EV%dm_ix, EV%dr_ix, EV%vc_ix, clxc, vb, grhoc_t, grhob_t, sigma, &
+            EV%high_ktau_dr_approx)
+    end if
+
+    ! DM-Photon: correct DM velocity with +R_dm*qg/4 (PerturbationEvolve only set -R_dm*vc)
+    if (.not. EV%TightCoupling .and. mu_dot_gamma > 0 .and. EV%vc_ix > 0 &
+        .and. .not. EV%no_phot_multpoles) then
+        R_dm_ph = 4._dl/3._dl * grhog_t / max(grhoc_t, 1e-30_dl) * mu_dot_gamma
+        ayprime(EV%vc_ix) = ayprime(EV%vc_ix) + R_dm_ph * qg / 4._dl
     end if
 
     if (.not. EV%no_phot_multpoles) then
@@ -2557,6 +2686,14 @@
         ayprime(EV%g_ix)=clxgdot
         qgdot=4._dl/3*(-vbdot-adotoa*vb+delta_p_b*k)/pb43 &
             +EV%denlk(1)*clxg-EV%denlk2(1)*pig
+        ! DM-Photon: add momentum exchange to photon dipole (non-TCA only)
+        if (.not. EV%tightcoupling .and. mu_dot_gamma > 0 .and. EV%vc_ix > 0) then
+            block
+                real(dl) :: vc_dm_ph
+                vc_dm_ph = ay(EV%vc_ix)
+                qgdot = qgdot + mu_dot_gamma * (4._dl/3._dl * vc_dm_ph - qg)
+            end block
+        end if
         ayprime(EV%g_ix+1)=qgdot
 
         !  Use explicit equations for photon moments if appropriate
@@ -2565,35 +2702,35 @@
             polter = pig/10+9._dl/15*E2 !2/15*(3/4 pig + 9/2 E2)
             ix= EV%g_ix+2
             if (EV%lmaxg>2) then
-                pigdot=EV%denlk(2)*qg-EV%denlk2(2)*ay(ix+1)-opacity*(pig - polter) &
+                pigdot=EV%denlk(2)*qg-EV%denlk2(2)*ay(ix+1)-opacity_total*(pig - polter) &
                     +8._dl/15._dl*k*sigma
                 ayprime(ix)=pigdot
                 do  l=3,EV%lmaxg-1
                     ix=ix+1
-                    ayprime(ix)=(EV%denlk(l)*ay(ix-1)-EV%denlk2(l)*ay(ix+1))-opacity*ay(ix)
+                    ayprime(ix)=(EV%denlk(l)*ay(ix-1)-EV%denlk2(l)*ay(ix+1))-opacity_total*ay(ix)
                 end do
                 ix=ix+1
                 !  Truncate the photon moment expansion
-                ayprime(ix)=k*ay(ix-1)-(EV%lmaxg+1)*cothxor*ay(ix) -opacity*ay(ix)
+                ayprime(ix)=k*ay(ix-1)-(EV%lmaxg+1)*cothxor*ay(ix) -opacity_total*ay(ix)
             else !closed case
-                pigdot=EV%denlk(2)*qg-opacity*(pig - polter) +8._dl/15._dl*k*sigma
+                pigdot=EV%denlk(2)*qg-opacity_total*(pig - polter) +8._dl/15._dl*k*sigma
                 ayprime(ix)=pigdot
             endif
             !  Polarization
             !l=2
             ix=EV%polind+2
             if (EV%lmaxgpol>2) then
-                ayprime(ix) = -opacity*(ay(ix) - polter) - k/3._dl*ay(ix+1)
+                ayprime(ix) = -opacity_total*(ay(ix) - polter) - k/3._dl*ay(ix+1)
                 do l=3,EV%lmaxgpol-1
                     ix=ix+1
-                    ayprime(ix)=-opacity*ay(ix) + (EV%denlk(l)*ay(ix-1)-EV%polfack(l)*ay(ix+1))
+                    ayprime(ix)=-opacity_total*ay(ix) + (EV%denlk(l)*ay(ix-1)-EV%polfack(l)*ay(ix+1))
                 end do
                 ix=ix+1
                 !truncate
-                ayprime(ix)=-opacity*ay(ix) + &
+                ayprime(ix)=-opacity_total*ay(ix) + &
                     k*EV%poltruncfac*ay(ix-1)-(EV%lmaxgpol+3)*cothxor*ay(ix)
             else !closed case
-                ayprime(ix) = -opacity*(ay(ix) - polter)
+                ayprime(ix) = -opacity_total*(ay(ix) - polter)
             endif
         end if
     end if
@@ -2766,16 +2903,43 @@
         !DIR$ LOOP COUNT MIN(1), AVG(1)
         do nu_i = 1, State%CP%Nu_mass_eigenstates
             if (EV%MassiveNuApprox(nu_i)) then
-                !Now EV%iq0 = clx, EV%iq0+1 = clxp, EV%iq0+2 = G_1, EV%iq0+3=G_2=pinu
-                !see astro-ph/0203507
-                G11_t=EV%G11(nu_i)/a/a2
-                G30_t=EV%G30(nu_i)/a/a2
                 off_ix = EV%nu_ix(nu_i)
                 w=wnu_arr(nu_i)
-                ayprime(off_ix)=-k*z*(w+1) + 3*adotoa*(w*ay(off_ix) - ay(off_ix+1))-k*ay(off_ix+2)
-                ayprime(off_ix+1)=(3*w-2)*adotoa*ay(off_ix+1) - 5._dl/3*k*z*w - k/3*G11_t
-                ayprime(off_ix+2)=(3*w-1)*adotoa*ay(off_ix+2) - k*(2._dl/3*EV%Kf(1)*ay(off_ix+3)-ay(off_ix+1))
-                ayprime(off_ix+3)=(3*w-2)*adotoa*ay(off_ix+3) + 2*w*k*sigma - k/5*(3*EV%Kf(2)*G30_t-2*G11_t)
+                if (CP%Accuracy%NuApproxMethod == 1) then
+                    !CLASS-style UFA: dp replaced by c_g^2*clx, dynamic G11 from I_v2
+                    am_nu = a*State%nu_masses(nu_i)
+                    if (CustomNuPSD(nu_i)%active) then
+                        call CustomNuPSD(nu_i)%rho_P(am_nu, rhonu_ufa, pnu_ufa)
+                        ppnu_ufa = CustomNuPSD(nu_i)%ppseudo(am_nu)
+                        iv2nu_ufa = CustomNuPSD(nu_i)%Iv2(am_nu)
+                    else
+                        call ThermalNuBack%rho_P(am_nu, rhonu_ufa, pnu_ufa)
+                        ppnu_ufa = ThermalNuBack%ppseudo(am_nu)
+                        iv2nu_ufa = ThermalNuBack%Iv2(am_nu)
+                    end if
+                    ppw = ppnu_ufa/max(pnu_ufa, 1e-30_dl)
+                    c_g2 = w*(5._dl - ppw)/(3._dl*max(1._dl + w, 1e-10_dl))
+                    dp_eff = c_g2*ay(off_ix)
+                    !clx: dp -> c_g2*clx
+                    ayprime(off_ix) = -k*z*(w+1) + 3*adotoa*(w*ay(off_ix) - dp_eff) - k*ay(off_ix+2)
+                    !dp slot: not evolved
+                    ayprime(off_ix+1) = 0._dl
+                    !q: dp -> c_g2*clx
+                    ayprime(off_ix+2) = (3*w-1)*adotoa*ay(off_ix+2) &
+                        - k*(2._dl/3*EV%Kf(1)*ay(off_ix+3) - dp_eff)
+                    !pi: G30_t=0, G11_t -> q*I_v2 (dynamic)
+                    ayprime(off_ix+3) = (3*w-2)*adotoa*ay(off_ix+3) + 2*w*k*sigma &
+                        + 2._dl*k/5._dl*ay(off_ix+2)*iv2nu_ufa
+                else
+                    !Standard CAMB MassiveNuApprox with stored G11/G30 modes
+                    !see astro-ph/0203507
+                    G11_t=EV%G11(nu_i)/a/a2
+                    G30_t=EV%G30(nu_i)/a/a2
+                    ayprime(off_ix)=-k*z*(w+1) + 3*adotoa*(w*ay(off_ix) - ay(off_ix+1))-k*ay(off_ix+2)
+                    ayprime(off_ix+1)=(3*w-2)*adotoa*ay(off_ix+1) - 5._dl/3*k*z*w - k/3*G11_t
+                    ayprime(off_ix+2)=(3*w-1)*adotoa*ay(off_ix+2) - k*(2._dl/3*EV%Kf(1)*ay(off_ix+3)-ay(off_ix+1))
+                    ayprime(off_ix+3)=(3*w-2)*adotoa*ay(off_ix+3) + 2*w*k*sigma - k/5*(3*EV%Kf(2)*G30_t-2*G11_t)
+                end if
             else
                 ind=EV%nu_ix(nu_i)
                 !DIR$ LOOP COUNT MIN(3), AVG(3)
@@ -2894,6 +3058,14 @@
                 phi = sigma_mg * phi_GR
             end block
         end if
+
+        ! Horndeski QSA: rescale Weyl potential by Sigma(a)
+        select type(DE => State%CP%DarkEnergy)
+        type is (THorndeskiDE)
+            if (DE%horn_active) then
+                phi = DE%Sigma_of_a(a) * phi
+            end if
+        end select
 
         if (associated(EV%OutputTransfer)) then
             EV%OutputTransfer(Transfer_kh) = k/(State%CP%h0/100._dl)
@@ -3198,6 +3370,7 @@
     subroutine derivst(EV,n,tau,ayt,aytprime)
     !  Evaluate the time derivatives of the tensor perturbations.
     use MassiveNu
+    use HorndeskiDE, only: THorndeskiDE
     implicit none
     type(EvolutionVars) EV
     integer n,l,i,ind, nu_i
@@ -3357,12 +3530,41 @@
     end if
 
     !  Get the propagation equation for the shear
+    ! Horndeski tensor: h_T'' + (2+alpha_M)*H*h_T' + (1+alpha_T)*k^2*h_T = source/M*^2
+    block
+        real(dl) :: friction_coeff, speed_coeff, source_coeff
 
-    if (State%flat) then
-        aytprime(ixt_shear)=-2*adotoa*shear+k*Hchi-rhopi/k
-    else
-        aytprime(ixt_shear)=-2*adotoa*shear+k*Hchi*(1+2*State%curv/k2)-rhopi/k
-    endif
+        friction_coeff = 2._dl
+        speed_coeff = 1._dl
+        source_coeff = 1._dl
+
+        select type(DE => State%CP%DarkEnergy)
+        type is (THorndeskiDE)
+            if (DE%horn_active) then
+                block
+                    real(dl) :: grhov_t_loc, grho_loc, Omega_DE_loc
+                    call DE%BackgroundDensityAndPressure(State%grhov, a, grhov_t_loc)
+                    grho_loc = State%grho_no_de(a) + grhov_t_loc
+                    if (grho_loc > 0._dl) then
+                        Omega_DE_loc = grhov_t_loc / grho_loc
+                    else
+                        Omega_DE_loc = 0._dl
+                    end if
+                    friction_coeff = 2._dl + DE%alpha_M_of_a(a, Omega_DE_loc)
+                    speed_coeff = 1._dl + DE%alpha_T_of_a(a, Omega_DE_loc)
+                    source_coeff = 1._dl / DE%Mstar2_of_a(a)
+                end block
+            end if
+        end select
+
+        if (State%flat) then
+            aytprime(ixt_shear) = -friction_coeff*adotoa*shear + speed_coeff*k*Hchi &
+                - source_coeff*rhopi/k
+        else
+            aytprime(ixt_shear) = -friction_coeff*adotoa*shear &
+                + speed_coeff*k*Hchi*(1+2*State%curv/k2) - source_coeff*rhopi/k
+        endif
+    end block
 
     aytprime(ixt_H)=-k*shear
 

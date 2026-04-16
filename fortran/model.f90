@@ -22,7 +22,7 @@
     !Nu_approx: approximate scheme - good for CMB, but not formally correct and no good for matter power
     !Nu_best: automatically use mixture which is fastest and most accurate
 
-    integer, parameter :: max_Nu = 5 !Maximum number of neutrino species
+    integer, parameter :: max_Nu = 7 !Maximum number of neutrino species (increased for WDM Boltzmann)
     integer, parameter :: max_transfer_redshifts = 256
 
     type TransferParams
@@ -92,6 +92,8 @@
         real(dl) :: KmaxBoost = 1._dl !Boost max k for source window functions
 
         real(dl) :: neutrino_q_boost = 1._dl !number of momenta integrated for neutrino perturbations
+
+        integer :: NuApproxMethod = 0  !0=CAMB default (G11/G30 stored modes), 1=CLASS-style UFA (c_g^2/c_vis^2 closure)
 
     end type AccuracyParams
 

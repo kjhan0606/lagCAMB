@@ -19,7 +19,9 @@
     procedure :: PrintFeedback => TDarkMatterModel_PrintFeedback
     procedure :: DragRate_DM => TDarkMatterModel_DragRate_DM
     procedure :: DragRate_Baryon => TDarkMatterModel_DragRate_Baryon
+    procedure :: DragRate_Photon => TDarkMatterModel_DragRate_Photon
     procedure :: SetBackgroundDensities => TDarkMatterModel_SetBackgroundDensities
+    procedure :: ModifyNeutrinoParams => TDarkMatterModel_ModifyNeutrinoParams
     end type TDarkMatterModel
 
     public TDarkMatterModel
@@ -71,12 +73,13 @@
     end subroutine TDarkMatterModel_PerturbationInitial
 
     subroutine TDarkMatterModel_PerturbationEvolve(this, ayprime, a, adotoa, k, z, y, &
-        dm_ix, dr_ix, vc_ix, clxc, vb, grhoc_t, grhob_t, sigma)
+        dm_ix, dr_ix, vc_ix, clxc, vb, grhoc_t, grhob_t, sigma, high_ktau_dr)
     class(TDarkMatterModel), intent(in) :: this
     real(dl), intent(inout) :: ayprime(:)
     real(dl), intent(in) :: a, adotoa, k, z, y(:)
     integer, intent(in) :: dm_ix, dr_ix, vc_ix
     real(dl), intent(in) :: clxc, vb, grhoc_t, grhob_t, sigma
+    logical, intent(in), optional :: high_ktau_dr
 
     end subroutine TDarkMatterModel_PerturbationEvolve
 
@@ -100,6 +103,13 @@
     R_drag = 0._dl
     end function TDarkMatterModel_DragRate_Baryon
 
+    function TDarkMatterModel_DragRate_Photon(this, a, adotoa, grhoc_t, grhog_t) result(mu_dot)
+    class(TDarkMatterModel), intent(in) :: this
+    real(dl), intent(in) :: a, adotoa, grhoc_t, grhog_t
+    real(dl) :: mu_dot
+    mu_dot = 0._dl
+    end function TDarkMatterModel_DragRate_Photon
+
     subroutine TDarkMatterModel_SetBackgroundDensities(this, grhocrit, grhor, h2, grhodmdr, grhodr)
     class(TDarkMatterModel), intent(in) :: this
     real(dl), intent(in) :: grhocrit, grhor, h2
@@ -107,5 +117,17 @@
     grhodmdr = 0._dl
     grhodr = 0._dl
     end subroutine TDarkMatterModel_SetBackgroundDensities
+
+    subroutine TDarkMatterModel_ModifyNeutrinoParams(this, max_nu_val, &
+        Nu_mass_eigenstates, Nu_mass_degeneracies, Nu_mass_fractions, &
+        Nu_mass_numbers, Num_Nu_Massive, Num_Nu_Massless, omnuh2, omch2, H0)
+    class(TDarkMatterModel), intent(inout) :: this
+    integer, intent(in) :: max_nu_val
+    integer, intent(inout) :: Nu_mass_eigenstates, Num_Nu_Massive
+    real(dl), intent(inout) :: Nu_mass_degeneracies(:), Nu_mass_fractions(:)
+    integer, intent(inout) :: Nu_mass_numbers(:)
+    real(dl), intent(inout) :: Num_Nu_Massless, omnuh2, omch2, H0
+    ! Default: do nothing
+    end subroutine TDarkMatterModel_ModifyNeutrinoParams
 
     end module DarkMatterInteraction

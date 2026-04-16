@@ -311,12 +311,17 @@ class FuzzyDMField(DarkEnergyModel):
         ("N_match", c_int, "KG->EFA transition criterion m/H"),
         ("npoints_bg", c_int, "Background integration points"),
         ("min_steps_per_osc_bg", c_int, "Min steps per oscillation"),
+        ("potential_type", c_int, "1=quadratic, 2=cosine [1-cos(phi/f)]^n"),
+        ("n_potential", c_int, "Power of cosine potential"),
+        ("f_decay", c_double, "Decay constant [M_Pl] for cosine potential"),
+        ("use_improved_efa", c_bool, "Use Passaglia-Hu improved EFA"),
     )
 
     _fortran_class_module_ = "FuzzyDMField"
     _fortran_class_name_ = "TFuzzyDMField"
 
-    def set_params(self, m_axion=1e-22, f_axion=0.0, omega_axion_h2=0.0, N_match=100):
+    def set_params(self, m_axion=1e-22, f_axion=0.0, omega_axion_h2=0.0, N_match=100,
+                   potential_type=1, n_potential=1, f_decay=1.0, use_improved_efa=True):
         """
         Set fuzzy DM field parameters.
 
@@ -324,11 +329,77 @@ class FuzzyDMField(DarkEnergyModel):
         :param f_axion: fraction of CDM+axion budget that is axion
         :param omega_axion_h2: axion density (0 uses f_axion * omch2)
         :param N_match: KG->EFA transition criterion m/H (default 100)
+        :param potential_type: 1=quadratic, 2=cosine [1-cos(phi/f)]^n
+        :param n_potential: power of cosine potential
+        :param f_decay: decay constant [M_Pl] for cosine potential
+        :param use_improved_efa: use Passaglia-Hu improved EFA corrections
         """
         self.m_axion = m_axion
         self.f_axion = f_axion
         self.omega_axion_h2 = omega_axion_h2
         self.N_match = N_match
+        self.potential_type = potential_type
+        self.n_potential = n_potential
+        self.f_decay = f_decay
+        self.use_improved_efa = use_improved_efa
+
+    def __getstate__(self):
+        raise TypeError("Cannot save class with splines")
+
+
+@fortran_class
+class HorndeskiDE(DarkEnergyEqnOfState):
+    """
+    Horndeski scalar-tensor gravity with alpha parameterization (QSA).
+
+    Implements the Bellini & Sawicki (2014) alpha parameterization:
+    alpha_X(a) = alpha_X_0 * Omega_DE(a) (proportional parameterization).
+
+    Modifications:
+        - Modified Poisson equation via mu(a) from alpha_K, alpha_B, alpha_T
+        - Modified lensing (Weyl) potential via Sigma(a)
+        - Modified tensor propagation: (2+alpha_M)*H friction, (1+alpha_T)*k^2 speed
+        - Running Planck mass M*^2(a) from integrating alpha_M
+
+    Mutually exclusive with MuSigmaMG.
+
+    References: Bellini & Sawicki 2014 (arXiv:1404.3713),
+    Pogosian & Silvestri 2016 (arXiv:1606.05339),
+    Zumalacárregui+ 2017 (hi_class, arXiv:1605.06102).
+    """
+
+    _fortran_class_module_ = "HorndeskiDE"
+    _fortran_class_name_ = "THorndeskiDE"
+
+    _methods_ = (
+        ("SetHorndeskiParams", [
+            POINTER(c_double), POINTER(c_double), POINTER(c_double),
+            POINTER(c_double), POINTER(c_double),
+        ]),
+    )
+
+    def set_params(self, w=-1.0, wa=0, alpha_K=0.0, alpha_B=0.0,
+                   alpha_M=0.0, alpha_T=0.0, M_star_ini=1.0, **kwargs):
+        """
+        Set Horndeski gravity parameters.
+
+        :param w: w(0) DE equation of state
+        :param wa: -dw/da(0)
+        :param alpha_K: kineticity amplitude (proportional to Omega_DE)
+        :param alpha_B: braiding amplitude
+        :param alpha_M: Planck mass run rate amplitude
+        :param alpha_T: tensor speed excess amplitude
+        :param M_star_ini: initial M*^2/M_Pl^2
+        """
+        self.w = w
+        self.wa = wa
+        self.f_SetHorndeskiParams(
+            byref(c_double(float(alpha_K))),
+            byref(c_double(float(alpha_B))),
+            byref(c_double(float(alpha_M))),
+            byref(c_double(float(alpha_T))),
+            byref(c_double(float(M_star_ini))),
+        )
 
     def __getstate__(self):
         raise TypeError("Cannot save class with splines")
@@ -340,4 +411,5 @@ F2003Class._class_names.update({
     "ppf": DarkEnergyPPF,
     "interacting_de": InteractingDE,
     "fuzzy_dm_field": FuzzyDMField,
+    "horndeski": HorndeskiDE,
 })

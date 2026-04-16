@@ -263,39 +263,47 @@ class DMNeutrinoScattering(DarkMatterModel):
 @fortran_class
 class WarmDM(DarkMatterModel):
     """
-    Warm Dark Matter model using transfer function approach.
+    Warm Dark Matter model.
 
-    Applies WDM transfer function T(k) = [1 + (alpha*k)^(2*nu)]^(-5/nu)
-    to suppress small-scale power. Alpha depends on WDM mass and density.
+    Two modes:
+    1. Transfer function (default): T(k) = [1 + (alpha*k)^(2*nu)]^(-5/nu)
+    2. Full Boltzmann (boltzmann_mode=True): WDM registered as extra massive
+       neutrino species, using CAMB's neutrino Boltzmann hierarchy.
+       Exact for T_wdm_ratio=1; approximate for other values.
 
-    References: Bode+ 2001, Viel+ 2005, 2013.
+    References: Bode+ 2001, Viel+ 2005, Lesgourgues & Tram 2011.
 
     Parameters:
         m_wdm: WDM particle mass [keV]
         T_wdm_ratio: temperature ratio T_WDM/T_nu (default 1)
         Omega_wdm_h2: WDM density (0 = use all of omch2)
+        boltzmann_mode: use full Boltzmann instead of transfer function
     """
 
     _fields_ = (
         ("m_wdm", c_double, "WDM mass [keV]"),
         ("T_wdm_ratio", c_double, "T_WDM/T_nu ratio"),
         ("Omega_wdm_h2", c_double, "WDM density Omega_wdm h^2"),
+        ("boltzmann_mode", c_bool, "Full Boltzmann mode"),
     )
 
     _fortran_class_module_ = "WarmDM"
     _fortran_class_name_ = "TWarmDM"
 
-    def set_params(self, m_wdm=3.0, T_wdm_ratio=1.0, Omega_wdm_h2=0.0):
+    def set_params(self, m_wdm=3.0, T_wdm_ratio=1.0, Omega_wdm_h2=0.0,
+                   boltzmann_mode=False):
         """
         Set warm DM parameters.
 
         :param m_wdm: WDM mass in keV
         :param T_wdm_ratio: temperature ratio T_WDM/T_nu
         :param Omega_wdm_h2: WDM density (0 uses all omch2)
+        :param boltzmann_mode: True for full Boltzmann, False for transfer function
         """
         self.m_wdm = m_wdm
         self.T_wdm_ratio = T_wdm_ratio
         self.Omega_wdm_h2 = Omega_wdm_h2
+        self.boltzmann_mode = boltzmann_mode
         self.validate_params()
 
     def validate_params(self):
@@ -355,6 +363,86 @@ class FuzzyDM(DarkMatterModel):
             raise CAMBError("f_axion must be in [0, 1]")
 
 
+@fortran_class
+class MultiInteractingDM(DarkMatterModel):
+    """
+    Multi-Interacting DM: single DM fluid with up to 3 simultaneous channels.
+    - DR (ETHOS): DM-Dark Radiation Boltzmann hierarchy
+    - Baryon: DM-Baryon momentum transfer
+    - Photon: DM-Photon opacity (Boddy & Gluscevic 2018)
+
+    Reference: Becker+ 2021 (arXiv:2010.04074)
+    """
+    _fields_ = [
+        ("omdmdrh2", c_double),
+        ("N_dark", c_double),
+        ("a_dark", c_double * 6),
+        ("alpha_l_dark", c_double),
+        ("lmax_dr", c_int),
+        ("sigma_dmb", c_double),
+        ("n_dmb", c_int),
+        ("u_idm_g", c_double),
+        ("n_idm_g", c_int),
+        ("m_dm", c_double),
+        ("cs2_dm", c_double),
+    ]
+    _fortran_class_module_ = "MultiInteractingDM"
+    _fortran_class_name_ = "TMultiInteractingDM"
+
+    def set_params(self, omdmdrh2=0., N_dark=0., a_dark=None,
+                   alpha_l_dark=1., lmax_dr=15,
+                   sigma_dmb=0., n_dmb=0,
+                   u_idm_g=0., n_idm_g=0,
+                   m_dm=100., cs2_dm=0.):
+        self.omdmdrh2 = omdmdrh2
+        self.N_dark = N_dark
+        if a_dark is not None:
+            for i, v in enumerate(a_dark[:6]):
+                self.a_dark[i] = v
+        self.alpha_l_dark = alpha_l_dark
+        self.lmax_dr = lmax_dr
+        self.sigma_dmb = sigma_dmb
+        self.n_dmb = n_dmb
+        self.u_idm_g = u_idm_g
+        self.n_idm_g = n_idm_g
+        self.m_dm = m_dm
+        self.cs2_dm = cs2_dm
+
+    def validate_params(self):
+        if self.m_dm <= 0:
+            from .baseconfig import CAMBError
+            raise CAMBError("m_dm must be positive")
+
+
+@fortran_class
+class DMPhotonScattering(DarkMatterModel):
+    """
+    DM-Photon scattering model (Boddy & Gluscevic 2018).
+    sigma = sigma_Th * u_idm_g * (m_DM / 100 GeV) * (T/T_0)^n_idm_g
+    """
+    _fields_ = [
+        ("u_idm_g", c_double),
+        ("n_idm_g", c_int),
+        ("m_dm", c_double),
+    ]
+    _fortran_class_module_ = "DMPhoton"
+    _fortran_class_name_ = "TDMPhotonScattering"
+
+    def set_params(self, u_idm_g=0., n_idm_g=0, m_dm=100.):
+        self.u_idm_g = u_idm_g
+        self.n_idm_g = n_idm_g
+        self.m_dm = m_dm
+        self.validate_params()
+
+    def validate_params(self):
+        if self.u_idm_g < 0:
+            from .baseconfig import CAMBError
+            raise CAMBError("u_idm_g must be non-negative")
+        if self.m_dm <= 0:
+            from .baseconfig import CAMBError
+            raise CAMBError("m_dm must be positive")
+
+
 # Register short names
 F2003Class._class_names.update(
     {
@@ -364,5 +452,7 @@ F2003Class._class_names.update(
         "dm_neutrino": DMNeutrinoScattering,
         "warm_dm": WarmDM,
         "fuzzy_dm": FuzzyDM,
+        "dm_photon": DMPhotonScattering,
+        "multi_idm": MultiInteractingDM,
     }
 )

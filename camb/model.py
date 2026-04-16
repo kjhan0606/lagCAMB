@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Union and Optional types are now built-in to Python 3.10+
 
-max_nu = 5
+max_nu = 7
 max_transfer_redshifts = 256
 nthermo_derived = 13
 Transfer_kh = 1
@@ -207,6 +207,7 @@ class AccuracyParams(CAMB_Structure):
         ("SourceLimberBoost", c_double, "Scales when to switch to Limber for source windows"),
         ("KmaxBoost", c_double, "Boost max k for source window functions"),
         ("neutrino_q_boost", c_double, "Number of momenta integrated for neutrino perturbations"),
+        ("NuApproxMethod", c_int, "0=CAMB default (stored G11/G30 modes), 1=CLASS-style UFA (c_g^2/c_vis^2 closure)"),
     )
 
 
@@ -1161,6 +1162,39 @@ class CAMBparams(F2003Class):
         for line1, line2 in zip(p1.split("\n"), p2.split("\n")):
             if line1 != line2:
                 print(line1, " <-> ", line2)
+
+    def set_ncdm_psd(self, nu_index, q, f0):
+        """
+        Set custom phase-space distribution for a neutrino mass eigenstate.
+        The PSD will be normalized internally so that ∫q³f₀dq matches the
+        standard Fermi-Dirac value; only the shape matters.
+
+        :param nu_index: 0-based neutrino eigenstate index
+        :param q: array of comoving momenta in units of k_B*T_nu/c (ascending)
+        :param f0: array of f_0(q) values at each q point
+        """
+        q = np.asarray(q, dtype=np.float64)
+        f0 = np.asarray(f0, dtype=np.float64)
+        if len(q) != len(f0):
+            raise CAMBValueError("q and f0 must have the same length")
+        if len(q) < 2:
+            raise CAMBValueError("Need at least 2 q-points for custom PSD")
+        nq = c_int(len(q))
+        ni = c_int(nu_index + 1)
+        _SetCustomNuPSD(byref(ni), byref(nq),
+                        q.ctypes.data_as(POINTER(c_double)),
+                        f0.ctypes.data_as(POINTER(c_double)))
+
+    @staticmethod
+    def clear_ncdm_psd():
+        """Clear all custom neutrino PSDs, reverting to standard Fermi-Dirac."""
+        _ClearCustomNuPSD()
+
+
+_SetCustomNuPSD = camblib.__massivenu_MOD_setcustomnupsd
+_SetCustomNuPSD.argtypes = [POINTER(c_int), POINTER(c_int), POINTER(c_double), POINTER(c_double)]
+_ClearCustomNuPSD = camblib.__massivenu_MOD_clearcustomnupsd
+_ClearCustomNuPSD.argtypes = []
 
 
 def set_default_params(P):

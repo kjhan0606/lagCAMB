@@ -205,18 +205,20 @@
     end subroutine TDMDR_ETHOS_PerturbationInitial
 
     subroutine TDMDR_ETHOS_PerturbationEvolve(this, ayprime, a, adotoa, k, z, y, &
-        dm_ix, dr_ix, vc_ix, clxc, vb, grhoc_t, grhob_t, sigma)
+        dm_ix, dr_ix, vc_ix, clxc, vb, grhoc_t, grhob_t, sigma, high_ktau_dr)
     ! Evolve the coupled DM-DR system
     class(TDMDR_ETHOS), intent(in) :: this
     real(dl), intent(inout) :: ayprime(:)
     real(dl), intent(in) :: a, adotoa, k, z, y(:)
     integer, intent(in) :: dm_ix, dr_ix, vc_ix
     real(dl), intent(in) :: clxc, vb, grhoc_t, grhob_t, sigma
+    logical, intent(in), optional :: high_ktau_dr
     real(dl) :: clx_dm, v_dm, kappa, Gamma_DR, Gamma_DR_tilde
     real(dl) :: grhodmdr_t, grhodr_t
     real(dl) :: denl_l, denl2_l
     integer :: l, ix
     real(dl) :: a2, cothxor
+    logical :: use_ufa
 
     if (this%is_standard_cdm) return
     if (dm_ix <= 0 .or. dr_ix <= 0 .or. vc_ix <= 0) return
@@ -257,43 +259,46 @@
         - Gamma_DR * (v_dm - y(dr_ix + 1) / 4._dl)
 
     ! ============ DR Boltzmann hierarchy ============
-    ! F_0' = -k * F_1 - (h'/6) * delta_{l,0}
-    ! Here h'/6 = k*z/3 for the monopole source
-    ! Actually in synchronous gauge: F_0' = -k*F_1 + (2/3)*k^2*(h'+6eta')/(2k^2) source
-    ! The source is just the metric perturbation contribution
-    ! Following standard convention: F_0' = -k*F_1 - (2/3)*k*z (like clxr)
-    ! Wait, for massless radiation in sync gauge:
-    ! delta_r' = -(4/3)*k*(z + q_r) where q_r = F_1/4
-    ! So F_0' = -(4/3)*k*z - k*F_1
-    ayprime(dr_ix) = -(4._dl/3._dl)*k*z - k*y(dr_ix+1)
+    use_ufa = .false.
+    if (present(high_ktau_dr)) use_ufa = high_ktau_dr
 
-    ! F_1' = k/3 * (F_0 - 2*F_2) + Gamma_tilde_DR * (v_dm - F_1/4)
-    if (this%lmax_dr >= 2) then
-        ayprime(dr_ix + 1) = k/3._dl * (y(dr_ix) - 2._dl * y(dr_ix + 2)) &
-            + Gamma_DR_tilde * (v_dm - y(dr_ix + 1) / 4._dl)
+    if (use_ufa) then
+        ! UFA: only evolve F_0, F_1, F_2 (mirrors neutrino UFA, arXiv:1104.2933)
+        ayprime(dr_ix) = -(4._dl/3._dl)*k*z - k*y(dr_ix+1)
+        ayprime(dr_ix+1) = k/3._dl*(y(dr_ix) - 2._dl*y(dr_ix+2)) &
+            + Gamma_DR_tilde*(v_dm - y(dr_ix+1)/4._dl)
+        ! UFA closure for pi: pi' = -3*cothxor*pi - F_0' + shear source
+        ayprime(dr_ix+2) = -3._dl*cothxor*y(dr_ix+2) - ayprime(dr_ix) &
+            + 8._dl/15._dl*k*sigma &
+            - this%alpha_l_dark * Gamma_DR_tilde * y(dr_ix+2)
     else
-        ayprime(dr_ix + 1) = k/3._dl * y(dr_ix) &
-            + Gamma_DR_tilde * (v_dm - y(dr_ix + 1) / 4._dl)
-    end if
+        ! Full hierarchy
+        ayprime(dr_ix) = -(4._dl/3._dl)*k*z - k*y(dr_ix+1)
 
-    ! F_l' for l >= 2
-    do l = 2, this%lmax_dr - 1
-        ix = dr_ix + l
-        denl_l = k * real(l, dl) / real(2*l+1, dl)
-        denl2_l = k * real(l+1, dl) / real(2*l+1, dl)
-        ayprime(ix) = denl_l * y(ix-1) - denl2_l * y(ix+1) &
-            - this%alpha_l_dark * Gamma_DR_tilde * y(ix)
-        ! Add shear source for l=2
-        if (l == 2) then
-            ayprime(ix) = ayprime(ix) + 8._dl/15._dl * k * sigma
+        if (this%lmax_dr >= 2) then
+            ayprime(dr_ix + 1) = k/3._dl * (y(dr_ix) - 2._dl * y(dr_ix + 2)) &
+                + Gamma_DR_tilde * (v_dm - y(dr_ix + 1) / 4._dl)
+        else
+            ayprime(dr_ix + 1) = k/3._dl * y(dr_ix) &
+                + Gamma_DR_tilde * (v_dm - y(dr_ix + 1) / 4._dl)
         end if
-    end do
 
-    ! Truncation at l = lmax_dr
-    if (this%lmax_dr >= 2) then
-        ix = dr_ix + this%lmax_dr
-        ayprime(ix) = k * y(ix-1) - real(this%lmax_dr + 1, dl) * cothxor * y(ix) &
-            - this%alpha_l_dark * Gamma_DR_tilde * y(ix)
+        do l = 2, this%lmax_dr - 1
+            ix = dr_ix + l
+            denl_l = k * real(l, dl) / real(2*l+1, dl)
+            denl2_l = k * real(l+1, dl) / real(2*l+1, dl)
+            ayprime(ix) = denl_l * y(ix-1) - denl2_l * y(ix+1) &
+                - this%alpha_l_dark * Gamma_DR_tilde * y(ix)
+            if (l == 2) then
+                ayprime(ix) = ayprime(ix) + 8._dl/15._dl * k * sigma
+            end if
+        end do
+
+        if (this%lmax_dr >= 2) then
+            ix = dr_ix + this%lmax_dr
+            ayprime(ix) = k * y(ix-1) - real(this%lmax_dr + 1, dl) * cothxor * y(ix) &
+                - this%alpha_l_dark * Gamma_DR_tilde * y(ix)
+        end if
     end if
 
     end subroutine TDMDR_ETHOS_PerturbationEvolve

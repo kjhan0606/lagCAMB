@@ -34,6 +34,11 @@
         integer  :: N_match = 100            ! KG->EFA transition criterion m/H
         integer  :: npoints_bg = 5000        ! baseline background integration points
         integer  :: min_steps_per_osc_bg = 10
+        ! AxiCLASS improvements
+        integer  :: potential_type = 1       ! 1=quadratic, 2=cosine [1-cos(phi/f)]^n
+        integer  :: n_potential = 1          ! power of cosine potential
+        real(dl) :: f_decay = 1._dl          ! decay constant [M_Pl] for cosine potential
+        logical  :: use_improved_efa = .true. ! Passaglia-Hu improved EFA
 
         ! Cached quantities (set in Init, not mapped in Python)
         real(dl) :: m_planck = 0._dl
@@ -49,6 +54,8 @@
         ! Background density spline arrays
         integer :: bg_n = 0
         real(dl), dimension(:), allocatable :: bg_a, bg_rho, bg_ddrho
+        ! w(a) spline for improved EFA
+        real(dl), dimension(:), allocatable :: bg_w, bg_ddw
 
         ! State pointer for background integration
         class(CAMBdata), pointer :: bg_State => null()
@@ -75,20 +82,48 @@
 
 
     function VofPhi_val(this, phi) result(V)
-    ! V(phi) = (Vunits/2)*m_pl^2*phi^2 + frac_lambda0*grhov
+    ! V(phi) for different potential types
+    ! type 1: (Vunits/2)*m_pl^2*phi^2  (quadratic)
+    ! type 2: Lambda^4 * [1-cos(phi/f)]^n  (cosine, AxiCLASS)
     class(TFuzzyDMField), intent(in) :: this
     real(dl), intent(in) :: phi
     real(dl) :: V
-    V = Vunits * 0.5_dl * this%m_planck**2 * phi**2 &
-        + this%frac_lambda0 * this%cached_grhov
+    real(dl) :: Lambda4, cos_term
+
+    select case(this%potential_type)
+    case(2)
+        ! Cosine potential: Lambda^4 = m^2 * f^2 / n (matches quadratic at small phi)
+        Lambda4 = Vunits * this%m_planck**2 * this%f_decay**2 / this%n_potential
+        cos_term = 1._dl - cos(phi / this%f_decay)
+        V = Lambda4 * cos_term**this%n_potential + this%frac_lambda0 * this%cached_grhov
+    case default
+        ! Quadratic: V = (1/2) m^2 phi^2
+        V = Vunits * 0.5_dl * this%m_planck**2 * phi**2 &
+            + this%frac_lambda0 * this%cached_grhov
+    end select
     end function VofPhi_val
 
     function VofPhi_deriv1(this, phi) result(Vp)
-    ! dV/dphi = Vunits*m_pl^2*phi
+    ! dV/dphi for different potential types
     class(TFuzzyDMField), intent(in) :: this
     real(dl), intent(in) :: phi
     real(dl) :: Vp
-    Vp = Vunits * this%m_planck**2 * phi
+    real(dl) :: Lambda4, cos_term
+
+    select case(this%potential_type)
+    case(2)
+        Lambda4 = Vunits * this%m_planck**2 * this%f_decay**2 / this%n_potential
+        cos_term = 1._dl - cos(phi / this%f_decay)
+        ! dV/dphi = Lambda^4 * n * [1-cos]^(n-1) * sin(phi/f) / f
+        if (this%n_potential == 1) then
+            Vp = Lambda4 * sin(phi / this%f_decay) / this%f_decay
+        else
+            Vp = Lambda4 * this%n_potential * cos_term**(this%n_potential - 1) &
+                * sin(phi / this%f_decay) / this%f_decay
+        end if
+    case default
+        Vp = Vunits * this%m_planck**2 * phi
+    end select
     end function VofPhi_deriv1
 
 
@@ -254,8 +289,16 @@
 
     ! Initial field value from frozen density estimate
     ! V_ax(phi0) * a_osc^3 ~ grho_ax_today
-    initial_phi = sqrt(2._dl * this%grho_ax_today / &
-        (this%a_osc**3 * Vunits * this%m_planck**2))
+    if (this%potential_type == 2) then
+        ! For cosine: V = Lambda^4 * (1-cos(phi/f))^n, use small-angle to estimate
+        initial_phi = sqrt(2._dl * this%grho_ax_today / &
+            (this%a_osc**3 * Vunits * this%m_planck**2))
+        ! Clamp to < pi*f_decay to avoid crossing the potential peak
+        initial_phi = min(initial_phi, 3._dl * this%f_decay)
+    else
+        initial_phi = sqrt(2._dl * this%grho_ax_today / &
+            (this%a_osc**3 * Vunits * this%m_planck**2))
+    end if
 
     ! === KG background integration ===
     dloga = (-this%log_astart) / (this%npoints_bg - 1)
@@ -269,7 +312,8 @@
     phi = y(1)
     phidot = 0._dl
     tmp_a(1) = astart
-    tmp_rho(1) = a2 * Vunits * 0.5_dl * this%m_planck**2 * phi**2
+    ! Use VofPhi_val - but it adds frac_lambda0*grhov, so subtract it for axion-only part
+    tmp_rho(1) = a2 * (this%VofPhi_val(phi) - this%frac_lambda0 * this%cached_grhov)
 
     da_osc = 1._dl
     last_a = astart
@@ -302,7 +346,7 @@
         phidot = y(2) / a2
         ! Axion part of grhov_t (without Lambda)
         tmp_rho(ix) = 0.5_dl * phidot**2 &
-            + a2 * Vunits * 0.5_dl * this%m_planck**2 * phi**2
+            + a2 * (this%VofPhi_val(phi) - this%frac_lambda0 * this%cached_grhov)
 
         ! Track oscillation scale
         if (i == 1) then
@@ -336,7 +380,9 @@
 
     ! Allocate final arrays
     if (allocated(this%bg_a)) deallocate(this%bg_a, this%bg_rho, this%bg_ddrho)
+    if (allocated(this%bg_w)) deallocate(this%bg_w, this%bg_ddw)
     allocate(this%bg_a(tot_points), this%bg_rho(tot_points), this%bg_ddrho(tot_points))
+    allocate(this%bg_w(tot_points), this%bg_ddw(tot_points))
     this%bg_a(1:npoints_log) = tmp_a(1:npoints_log)
     this%bg_rho(1:npoints_log) = tmp_rho(1:npoints_log)
 
@@ -363,7 +409,7 @@
             phi = y(1)
             phidot = y(2) / a2
             this%bg_rho(ix) = 0.5_dl * phidot**2 &
-                + a2 * Vunits * 0.5_dl * this%m_planck**2 * phi**2
+                + a2 * (this%VofPhi_val(phi) - this%frac_lambda0 * this%cached_grhov)
         end do
     end if
 
@@ -371,6 +417,41 @@
 
     ! Build cubic spline for bg_rho(a)
     call spline(this%bg_a, this%bg_rho, tot_points, splZero, splZero, this%bg_ddrho)
+
+    ! Compute w(a) from rho(a): p = -rho - a/3 * drho/da  =>  w = p/rho
+    ! grho_ax_t = rho_ax * a^2.  d(grho_ax_t)/da = (2*rho + a*drho/da)*a = a^2*(2*rho/a + drho/da)
+    ! For matter-like (w=0): grho_t ~ 1/a => d(grho_t)/da ~ -1/a^2
+    ! w = -1 - a*d(ln grho_t)/da / 3 - 2/3  => w = -1 - (a/(3*grho_t)) * d(grho_t)/da - 2/3
+    ! Actually: grho_t = 8piG rho a^2, so rho = grho_t/a^2
+    ! rho' = (grho_t'/a^2 - 2*grho_t/a^3) = (grho_t' - 2*grho_t/a) / a^2
+    ! p + rho = -a*rho'/3 => p = -rho - a*rho'/3
+    ! w = p/rho = -1 - a*rho'/(3*rho) = -1 - a*(d ln rho/da)/3
+    ! = -1 - a/(3*grho_t) * (d(grho_t)/da - 2*grho_t/a) / 1
+    ! = -1 - (a*grho_t' - 2*grho_t)/(3*grho_t)
+    ! = -1/3 - a*grho_t'/(3*grho_t)
+    ! At a_match, w ~ 0 (matter-like) so grho_t ~ 1/a
+    do i = 1, tot_points
+        if (i == 1) then
+            this%bg_w(i) = -1._dl  ! frozen field
+        else if (i == tot_points) then
+            this%bg_w(i) = 0._dl  ! matter-like at match
+        else
+            block
+                real(dl) :: grho_plus, grho_minus, da_w, dgrho_da, a_w
+                a_w = this%bg_a(i)
+                da_w = this%bg_a(i+1) - this%bg_a(i-1)
+                dgrho_da = (this%bg_rho(i+1) - this%bg_rho(i-1)) / da_w
+                if (this%bg_rho(i) > 0._dl) then
+                    this%bg_w(i) = -1._dl/3._dl - a_w * dgrho_da / (3._dl * this%bg_rho(i))
+                else
+                    this%bg_w(i) = 0._dl
+                end if
+                ! Clamp w to physical range
+                this%bg_w(i) = max(min(this%bg_w(i), 1._dl), -1._dl)
+            end block
+        end if
+    end do
+    call spline(this%bg_a, this%bg_w, tot_points, splZero, splZero, this%bg_ddw)
 
     ! Record axion grhov_t at a_match (instantaneous, ~cycle average for large N_match)
     this%grho_match = this%bg_rho(tot_points)
@@ -455,7 +536,8 @@
     real(dl), intent(inout) :: ayprime(:)
     real(dl), intent(in) :: a, adotoa, w, k, z, y(:)
     integer, intent(in) :: w_ix
-    real(dl) :: delta_ax, v_ax, cs2, Hv3_over_k
+    real(dl) :: delta_ax, v_ax, cs2, cs2_phi, Hv3_over_k
+    real(dl) :: w_efa, ca2, H_over_m, one_plus_w
 
     if (this%is_cosmological_constant) return
 
@@ -468,14 +550,40 @@
     delta_ax = y(w_ix)
     v_ax = y(w_ix + 1)
 
-    ! Passaglia-Hu effective sound speed
-    cs2 = k**2 / (4._dl * this%m_conf**2 * a**2 + k**2)
+    ! Quantum pressure sound speed (always present)
+    cs2_phi = k**2 / (4._dl * this%m_conf**2 * a**2 + k**2)
 
-    ! Fluid equations for w=0 component
-    Hv3_over_k = 3._dl * adotoa * v_ax / k
-    ayprime(w_ix) = -k * v_ax - k * z &
-        - 3._dl * adotoa * cs2 * (delta_ax + Hv3_over_k)
-    ayprime(w_ix + 1) = -adotoa * v_ax + cs2 * k * delta_ax
+    if (this%use_improved_efa) then
+        ! Passaglia & Hu 2022 improved EFA corrections
+        H_over_m = adotoa / (this%m_conf * a)
+
+        ! Improved effective EOS: w_efa = (3/2)(H/m)^2
+        w_efa = 1.5_dl * H_over_m**2
+
+        ! Improved sound speed: cs2 = cs2_phi + (5/4)(H/m)^2
+        cs2 = cs2_phi + 1.25_dl * H_over_m**2
+
+        ! Adiabatic sound speed: ca2 = w - a*dw/da / (3*(1+w))
+        ! For improved EFA, ca2 ~ w_efa (since w varies slowly)
+        ca2 = w_efa
+        one_plus_w = max(1._dl + w_efa, 1e-10_dl)
+
+        ! GDM form perturbation equations
+        Hv3_over_k = 3._dl * adotoa * v_ax / k
+        ! delta' = -(1+w)(k*v + k*z) - 3H(cs2-w)(delta + 3H*v/k)
+        ayprime(w_ix) = -one_plus_w * (k * v_ax + k * z) &
+            - 3._dl * adotoa * (cs2 - w_efa) * (delta_ax + Hv3_over_k)
+        ! v' = -(1-3w)H*v + cs2*k*delta/(1+w)
+        ayprime(w_ix + 1) = -(1._dl - 3._dl * w_efa) * adotoa * v_ax &
+            + cs2 * k * delta_ax / one_plus_w
+    else
+        ! Original EFA: w=0, cs2 = quantum pressure only
+        cs2 = cs2_phi
+        Hv3_over_k = 3._dl * adotoa * v_ax / k
+        ayprime(w_ix) = -k * v_ax - k * z &
+            - 3._dl * adotoa * cs2 * (delta_ax + Hv3_over_k)
+        ayprime(w_ix + 1) = -adotoa * v_ax + cs2 * k * delta_ax
+    end if
 
     end subroutine TFuzzyDMField_PerturbationEvolve
 
@@ -490,6 +598,9 @@
     this%f_axion = Ini%Read_Double('FuzzyDMField_f_axion', 0._dl)
     this%omega_axion_h2 = Ini%Read_Double('FuzzyDMField_omega_axion_h2', 0._dl)
     this%N_match = Ini%Read_Int('FuzzyDMField_N_match', 100)
+    this%potential_type = Ini%Read_Int('FuzzyDMField_potential_type', 1)
+    this%n_potential = Ini%Read_Int('FuzzyDMField_n_potential', 1)
+    this%f_decay = Ini%Read_Double('FuzzyDMField_f_decay', 1._dl)
 
     end subroutine TFuzzyDMField_ReadParams
 

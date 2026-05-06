@@ -24,13 +24,38 @@ Dark Energy models
    :show-inheritance:
    :members:
 
+Interacting Dark Energy
+-----------------------
+
 .. autoclass:: camb.dark_energy.InteractingDE
    :show-inheritance:
    :members:
 
+.. image:: figures/interacting_dark_energy.png
+   :alt: Interacting DE vs LCDM
+   :width: 100%
+
+Horndeski Scalar-Tensor Gravity
+-------------------------------
+
+.. autoclass:: camb.dark_energy.HorndeskiDE
+   :show-inheritance:
+   :members:
+
+.. image:: figures/horndeski_gravity.png
+   :alt: Horndeski Gravity vs LCDM
+   :width: 100%
+
+Fuzzy DM Field (Klein-Gordon)
+-----------------------------
+
 .. autoclass:: camb.dark_energy.FuzzyDMField
    :show-inheritance:
    :members:
+
+.. image:: figures/fuzzy_dm_field.png
+   :alt: FuzzyDMField vs LCDM
+   :width: 100%
 
 .. autoclass:: camb.dark_energy.AxionEffectiveFluid
    :show-inheritance:

@@ -59,6 +59,21 @@ After installation you can also run CAMB from the command line reading parameter
 To compile the Fortran command-line code run "make camb" in the fortran directory. For full details
 see the  `ReadMe <https://camb.info/readme.html>`_.
 
+Building the Sphinx HTML documentation
+======================================
+
+The Sphinx sources live under ``docs/source/`` (with figures embedded in the
+non-standard cosmology pages). To build the HTML docs locally::
+
+    pip install sphinx sphinx_rtd_theme
+    sphinx-build -b html docs/source docs/_build/html
+
+Then open ``docs/_build/html/index.html`` in a browser. To force a clean
+rebuild (e.g. after editing figures or autoclass docstrings)::
+
+    rm -rf docs/_build/html
+    sphinx-build -E -b html docs/source docs/_build/html
+
 Branches
 =============================
 

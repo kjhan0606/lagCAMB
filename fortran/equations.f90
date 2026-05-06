@@ -643,7 +643,11 @@
                 else
                     neq = neq + CP%DarkMatter%num_dr_equations
                 end if
-                maxeq = maxeq + CP%DarkMatter%num_dr_equations
+                if (EV%high_ktau_dr_approx) then
+                    maxeq = maxeq + 3
+                else
+                    maxeq = maxeq + CP%DarkMatter%num_dr_equations
+                end if
             end if
         end if
     end if
@@ -2346,6 +2350,11 @@
     grhor_t=State%grhornomass/a2
     grhog_t=State%grhog/a2
 
+    ! Allow DarkMatter model to modify CDM background density (e.g. DecayingDM)
+    if (allocated(State%CP%DarkMatter)) then
+        call State%CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t)
+    end if
+
     if (EV%is_cosmological_constant) then
         grhov_t = State%grhov * a2
         w_dark_energy_t = -1_dl
@@ -3251,6 +3260,9 @@
     grhoc_t=State%grhoc/a
     grhor_t=State%grhornomass/a2
     grhog_t=State%grhog/a2
+    if (allocated(CP%DarkMatter)) then
+        call CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t)
+    end if
     call CP%DarkEnergy%BackgroundDensityAndPressure(State%grhov, a, grhov_t, w_dark_energy_t)
 
     grho=grhob_t+grhoc_t+grhor_t+grhog_t+grhov_t

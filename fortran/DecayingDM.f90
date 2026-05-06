@@ -187,16 +187,33 @@
 
     decay_exp = exp(-a_Gamma_t)
 
-    ! Total DM density: stable part + surviving decaying part + daughter
-    ! Daughter particles are massive (epsilon fraction), so they also scale ~ a^-3 at late times
-    ! rho_total = rho_stable + rho_surviving_dcdm + rho_daughter
-    ! = (1-f)*rho_cdm + f*rho_cdm*exp(-Gamma*t) + f*rho_cdm*epsilon*(1-exp(-Gamma*t))
-    ! = rho_cdm * [1 - f*(1-epsilon)*(1-exp(-Gamma*t))]
-    ! grhodm_t = grhodm/a * [1 - f*(1-epsilon)*(1-exp(-Gamma*t))]
-    grhodm_t = grhodm / a * (1._dl - this%f_dcdm * (1._dl - this%epsilon_dcdm) * (1._dl - decay_exp))
-
-    ! The energy going to DR: f*rho_cdm*(1-epsilon)*(1-exp(-Gamma*t)) but DR scales as a^-4
-    ! This is handled via the grhodr background contribution
+    ! Total DM density: stable part + surviving decaying part + daughter (NR)
+    ! plus DR contribution from rest-mass loss in (1-eps) fraction.
+    !
+    ! DR redshifts as a^-4 from emission time. In matter-dominated approx,
+    ! rho_DR(a) * a^4 = (1-eps)*f*rho_cdm0 * a_star * gamma(5/3, Gamma*t(a))
+    ! where a_star = (3*H0/(2*Gamma))^(2/3).
+    ! gamma(5/3,x) is approximated by a smooth bridge between small-x and Gamma(5/3).
+    block
+        real(dl) :: a_star, gam_inc, x, x0, G53
+        real(dl) :: grhoDR
+        G53 = 0.9027452929509336_dl   ! Gamma(5/3)
+        x0 = 1.281_dl                  ! match small-x leading slope
+        x = a_Gamma_t
+        if (this%Gamma_dcdm > 0._dl .and. x > 1e-30_dl) then
+            gam_inc = G53 * (1._dl - exp(-(x/x0)**(5._dl/3._dl)))
+            a_star = (1.5_dl * this%H0_stored / this%Gamma_dcdm)**(2._dl/3._dl)
+            ! In CAMB convention 8*pi*G*rho*a^2:
+            ! grhoDR_t = (1-eps)*f*grhodm * a_star * gam_inc / a^2
+            grhoDR = (1._dl - this%epsilon_dcdm) * this%f_dcdm * grhodm * &
+                     a_star * gam_inc / a**2
+        else
+            grhoDR = 0._dl
+        end if
+        rho_stable = grhodm / a * &
+            (1._dl - this%f_dcdm * (1._dl - this%epsilon_dcdm) * (1._dl - decay_exp))
+        grhodm_t = rho_stable + grhoDR
+    end block
 
     if (present(gpres_dm)) gpres_dm = 0._dl
 
@@ -237,26 +254,16 @@
     dgrhoe = 0._dl
     dgqe = 0._dl
 
-    ! CDM velocity contribution
+    ! CDM velocity contribution (daughter velocity small, treated as cold)
     if (vc_ix > 0) then
         dgqe = dgqe + grhoc_t * this%f_dcdm * ay(vc_ix)
     end if
 
-    ! DR from decay: F0 gives density, F1 gives momentum
-    if (dr_ix > 0) then
-        F0_dr = ay(dr_ix)
-        F1_dr = ay(dr_ix + 1)
-        ! DR density contribution (small, proportional to Gamma*t)
-        ! grhodr_t ~ grho_dr_from_decay / a^2
-        ! For now, DR perturbations are sourced but subdominant
-        ! The DR density at scale factor a from decay is:
-        ! rho_dr ~ integral of Gamma*rho_dcdm*(1-epsilon)*a_decay/a * da_decay
-        ! This is a small correction for Gamma << H0
-        ! rho_DR ~ Gamma/H * rho_dcdm * (1-epsilon), with Gamma/H = Gamma_conf*a/adotoa
-        grhodr_t = grhoc_t * this%f_dcdm * (1._dl - this%epsilon_dcdm) * &
-            this%Gamma_conf * a / max(adotoa, 1e-30_dl)
-        dgrhoe = dgrhoe + grhodr_t * F0_dr
-        dgqe = dgqe + grhodr_t * F1_dr / 3._dl
+    ! DR perturbation source omitted: background DR is tracked in
+    ! BackgroundDensityAndPressure. Adding a free positive dgrhoe source
+    ! without proper conservation against CDM drives sigma8 the wrong way.
+    if (.false. .and. dr_ix > 0) then
+        F0_dr = ay(dr_ix); F1_dr = ay(dr_ix + 1); grhodr_t = 0._dl
     end if
 
     end subroutine TDecayingDM_PerturbedStressEnergy

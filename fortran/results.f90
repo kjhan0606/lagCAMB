@@ -1260,10 +1260,17 @@
     !  Return 8*pi*G*rho_no_de*a**4 where rho_no_de includes everything except dark energy.
     class(CAMBdata) :: this
     real(dl), intent(in) :: a
-    real(dl) grhoa2, rhonu
+    real(dl) grhoa2, rhonu, grhoc_t
     integer nu_i
 
-    grhoa2 = this%grhok * a**2 + (this%grhoc + this%grhob) * a + this%grhog + this%grhornomass
+    grhoa2 = this%grhok * a**2 + this%grhob * a + this%grhog + this%grhornomass
+    ! CDM contribution: allow DarkMatter override (e.g. DecayingDM)
+    if (allocated(this%CP%DarkMatter)) then
+        call this%CP%DarkMatter%BackgroundDensityAndPressure(this%grhoc, a, grhoc_t)
+        grhoa2 = grhoa2 + grhoc_t * a**2  ! grhoc_t = 8piG*rho*a^2
+    else
+        grhoa2 = grhoa2 + this%grhoc * a
+    end if
 
     if (this%CP%Num_Nu_massive /= 0) then
         !Get massive neutrino density relative to massless

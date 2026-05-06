@@ -167,8 +167,9 @@
 
     v_dm = 0._dl
     if (vc_ix > 0) v_dm = ay(vc_ix)
-    ! (rho+p)*v for DR: (4/3)*rho_dr * (F1/4)
-    dgqe = grhodmdr_t * v_dm + grhodr_t * F1_dr / 3._dl
+    ! For radiation in CAMB convention F_1 = qr (== (1+w)*v = (4/3)*v_r),
+    ! so (rho+p)*v contribution is grhodr_t * F_1 (matches grhor_t*qr in equations.f90).
+    dgqe = grhodmdr_t * v_dm + grhodr_t * F1_dr
 
     end subroutine TDMDR_ETHOS_PerturbedStressEnergy
 
@@ -195,11 +196,13 @@
         y(vc_ix) = 0._dl
     end if
 
-    ! DR hierarchy: adiabatic, like photons/massless neutrinos
+    ! DR hierarchy: adiabatic, matching CAMB massless-neutrino IC
+    ! (synchronous gauge, leading order in x = k*tau, R_v -> 1 limit).
+    ! See equations.f90 SetInitial: clxr ~ -x^2/3, qr ~ -x^3/27 in pure-radiation limit.
     if (dr_ix > 0) then
-        y(dr_ix) = -2._dl/3._dl * x2     ! F_0 = -(2/3) k^2 tau^2 (like clxr)
-        y(dr_ix + 1) = 2._dl/9._dl * x3  ! F_1 = (2/9) k^3 tau^3
-        ! F_l = 0 for l >= 2 (already zero)
+        y(dr_ix) = -x2/3._dl              ! F_0 = clxr leading order
+        y(dr_ix + 1) = -x3/27._dl         ! F_1 = qr leading order
+        ! F_l = 0 for l >= 2 (subdominant)
     end if
 
     end subroutine TDMDR_ETHOS_PerturbationInitial
@@ -219,12 +222,13 @@
     integer :: l, ix
     real(dl) :: a2, cothxor
     logical :: use_ufa
+    real(dl) :: R4, Vdot, F0dot
 
     if (this%is_standard_cdm) return
     if (dm_ix <= 0 .or. dr_ix <= 0 .or. vc_ix <= 0) return
 
     a2 = a*a
-    cothxor = adotoa / a  ! 1/tau approximation for flat
+    cothxor = adotoa  ! ≈ 1/tau (exact in radiation era)
 
     grhodmdr_t = this%grhodmdr_bg / a
     grhodr_t = this%grhodr_bg / a2
@@ -247,31 +251,66 @@
     clx_dm = y(dm_ix)
     v_dm = y(vc_ix)
 
-    ! ============ DM equations (fluid) ============
-    ! delta_dm' = -k*v_dm - h'/2
-    ! In synchronous gauge, h'/2 = k*z (where z = (h'+6*eta')/(2k))
-    ! But actually h' contribution is through -k*z for density
-    ayprime(dm_ix) = -k * v_dm - k * z
-
-    ! v_dm' = -aH * v_dm + cs2_dm * k * delta_dm - Gamma_DR * (v_dm - F_1/4)
-    ! F_1/4 is the DR velocity (v_DR)
-    ayprime(vc_ix) = -adotoa * v_dm + this%cs2_dm * k * clx_dm &
-        - Gamma_DR * (v_dm - y(dr_ix + 1) / 4._dl)
-
     ! ============ DR Boltzmann hierarchy ============
     use_ufa = .false.
     if (present(high_ktau_dr)) use_ufa = high_ktau_dr
 
-    if (use_ufa) then
+    ! R4 = (4/3)*rho_DR/rho_DM (momentum ratio, analogous to photon-baryon pb43)
+    R4 = (4._dl/3._dl) * grhodr_t / max(grhodmdr_t, 1e-30_dl)
+
+    if ((Gamma_DR + Gamma_DR_tilde/4._dl) > 50._dl * k) then
+        ! ============ TIGHT COUPLING APPROXIMATION ============
+        ! When Gamma >> k, v_dm and F_1/4 are locked together.
+        ! Use combined momentum equation (collision terms cancel).
+        ! Mirrors CAMB photon-baryon TCA.
+
+        ! DM density: delta_dm' = -k*V - k*z
+        ayprime(dm_ix) = -k * v_dm - k * z
+
+        ! Combined velocity: V' = [-aH*V + cs2*k*delta + R4*k*F0/12] / (1+R4)
+        Vdot = (-adotoa * v_dm + this%cs2_dm * k * clx_dm &
+            + R4 * k * y(dr_ix) / 12._dl) / (1._dl + R4)
+        ayprime(vc_ix) = Vdot
+
+        ! F_0' = -(4/3)*k*z - k*F_1  (use F_1 = 4*V)
+        ayprime(dr_ix) = -(4._dl/3._dl) * k * z - 4._dl * k * v_dm
+
+        ! F_1' = 4*V' (slaved to v_dm in TCA)
+        ayprime(dr_ix + 1) = 4._dl * Vdot
+
+        ! F_l = 0 for l >= 2 (suppressed by collisions)
+        ! In UFA mode only 3 slots (F_0,F_1,F_2) allocated; in full mode lmax_dr+1 slots
+        if (use_ufa) then
+            ayprime(dr_ix + 2) = 0._dl
+        else
+            do l = 2, this%lmax_dr
+                ayprime(dr_ix + l) = 0._dl
+            end do
+        end if
+
+    else if (use_ufa) then
+        ! ============ UFA (k*tau >> 1) ============
+        ! DM equations
+        ayprime(dm_ix) = -k * v_dm - k * z
+        ayprime(vc_ix) = -adotoa * v_dm + this%cs2_dm * k * clx_dm &
+            - Gamma_DR * (v_dm - y(dr_ix + 1) / 4._dl)
+
         ! UFA: only evolve F_0, F_1, F_2 (mirrors neutrino UFA, arXiv:1104.2933)
-        ayprime(dr_ix) = -(4._dl/3._dl)*k*z - k*y(dr_ix+1)
+        F0dot = -(4._dl/3._dl)*k*z - k*y(dr_ix+1)
+        ayprime(dr_ix) = F0dot
         ayprime(dr_ix+1) = k/3._dl*(y(dr_ix) - 2._dl*y(dr_ix+2)) &
             + Gamma_DR_tilde*(v_dm - y(dr_ix+1)/4._dl)
-        ! UFA closure for pi: pi' = -3*cothxor*pi - F_0' + shear source
-        ayprime(dr_ix+2) = -3._dl*cothxor*y(dr_ix+2) - ayprime(dr_ix) &
+        ! UFA closure for pi: pi' = -3/tau*pi - F_0' + (8/15)*k*sigma - damping
+        ayprime(dr_ix+2) = -3._dl*cothxor*y(dr_ix+2) - F0dot &
             + 8._dl/15._dl*k*sigma &
             - this%alpha_l_dark * Gamma_DR_tilde * y(dr_ix+2)
     else
+        ! ============ FULL HIERARCHY ============
+        ! DM equations
+        ayprime(dm_ix) = -k * v_dm - k * z
+        ayprime(vc_ix) = -adotoa * v_dm + this%cs2_dm * k * clx_dm &
+            - Gamma_DR * (v_dm - y(dr_ix + 1) / 4._dl)
+
         ! Full hierarchy
         ayprime(dr_ix) = -(4._dl/3._dl)*k*z - k*y(dr_ix+1)
 

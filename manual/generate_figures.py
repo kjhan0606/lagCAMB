@@ -285,6 +285,48 @@ def setup_fuzzydm():
         return out
     return _multi
 
+def setup_ethos_murgia():
+    """ETHOS Transfer (Murgia 2017 alpha-beta-gamma fit)"""
+    def _multi():
+        out = []
+        for alpha, lab in [(0.02, r'$\alpha=0.02$ Mpc/h'),
+                            (0.05, r'$\alpha=0.05$ Mpc/h'),
+                            (0.10, r'$\alpha=0.10$ Mpc/h')]:
+            pars = camb.CAMBparams()
+            pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+            pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+            pars.set_for_lmax(2500, lens_potential_accuracy=1)
+            pars.WantTransfer = True
+            pars.set_matter_power(redshifts=[0], kmax=10.0)
+            from camb.dark_matter import ETHOSTransferMurgia
+            pars.DarkMatter = ETHOSTransferMurgia()
+            pars.DarkMatter.set_params(alpha_mpch=alpha, beta_mur=2.24, gamma_mur=-4.46)
+            results = camb.get_results(pars)
+            out.append((pars, results, lab))
+        return out
+    return _multi
+
+def setup_ethos_physical():
+    """ETHOS Transfer (physical surrogate)"""
+    def _multi():
+        out = []
+        for a_dark, xi, lab in [(1e-4, 0.5, r'$a_{\rm dark}=10^{-4}$, $\xi=0.5$'),
+                                 (4e-4, 0.5, r'$a_{\rm dark}=4\times10^{-4}$, $\xi=0.5$'),
+                                 (1e-4, 1.0, r'$a_{\rm dark}=10^{-4}$, $\xi=1.0$')]:
+            pars = camb.CAMBparams()
+            pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+            pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+            pars.set_for_lmax(2500, lens_potential_accuracy=1)
+            pars.WantTransfer = True
+            pars.set_matter_power(redshifts=[0], kmax=10.0)
+            from camb.dark_matter import ETHOSTransferPhysical
+            pars.DarkMatter = ETHOSTransferPhysical()
+            pars.DarkMatter.set_params(a_dark_n=a_dark, xi_dr=xi, omdmdrh2=0.12, n_dark=2)
+            results = camb.get_results(pars)
+            out.append((pars, results, lab))
+        return out
+    return _multi
+
 def setup_warmdm():
     """Warm Dark Matter"""
     def _multi():
@@ -447,6 +489,8 @@ if __name__ == '__main__':
         (setup_dmneutrino(), 'DM-Neutrino Scattering', True),
         (setup_fuzzydm(), 'Fuzzy Dark Matter', True),
         (setup_warmdm(), 'Warm Dark Matter', True),
+        (setup_ethos_murgia(), 'ETHOS Transfer (Murgia)', True),
+        (setup_ethos_physical(), 'ETHOS Transfer (Physical)', True),
         (setup_dmphoton(), 'DM-Photon Scattering', True),
         (setup_interactingde(), 'Interacting Dark Energy', True),
         (setup_horndeski(), 'Horndeski Gravity', True),

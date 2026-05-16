@@ -84,6 +84,7 @@
         get_matter_power_spectrum,DMBaryonScattering,
         DMDR_ETHOS,DecayingDM,DMNeutrinoScattering,
         FuzzyDM,WarmDM,DMPhotonScattering,MultiInteractingDM,
+        ETHOSTransferMurgia,ETHOSTransferPhysical,
         InteractingDE,HorndeskiDE,FuzzyDMField,MG},
 }
 \lstset{style=python}
@@ -206,6 +207,8 @@ Fuzzy DM & DM & Quantum Jeans suppression & Hu+ 2000 \\
 Warm DM & DM & Free-streaming suppression & Viel+ 2005 \\
 DM--Photon & DM & CDM--photon opacity & Boddy \& Gluscevic 2018 \\
 Multi-IDM & DM & Combined channels & Becker+ 2021 \\
+ETHOS Transfer (Murgia) & DM & Small-scale $T(k)$ fit & Murgia+ 2017 \\
+ETHOS Transfer (Physical) & DM & ETHOS params $\to T(k)$ & Cyr-Racine+ 2016 \\
 Interacting DE & DE & DM--DE energy exchange & Costa+ 2017 \\
 Horndeski & DE/MG & Scalar-tensor gravity (QSA) & Bellini \& Sawicki 2014 \\
 $\mu$-$\Sigma$ MG & MG & Phenomenological MG & Zhao+ 2009 \\
@@ -275,6 +278,7 @@ Drag rates are internally capped at $10^4 \times \dot{a}/a$ to prevent ODE stiff
 % -------- DM-DR ETHOS --------
 \newpage
 \subsection{DM--Dark Radiation (ETHOS)}
+\label{sec:dmdr_ethos}
 
 \begin{physbox}{Physics}
 In the ETHOS (Effective Theory of Structure Formation) framework, dark matter couples to a dark radiation sector via scattering. DM evolves as a fluid ($\delta_{\rm DM}$, $v_{\rm DM}$) while DR is described by a Boltzmann hierarchy ($F_0, F_1, \ldots, F_{\ell_{\max}}$). The opacity is parameterized as:
@@ -645,6 +649,114 @@ results = camb.get_results(pars)
 
 \begin{notebox}
 Each channel contributes independently to the DM drag force. The number of perturbation equations varies dynamically: 1 (velocity only) to $1 + 1 + (\ell_{\max,\rm DR}+1)$ when DR is active.
+\end{notebox}
+
+
+% -------- ETHOS Transfer (Murgia) --------
+\newpage
+\subsection{ETHOS Transfer (Murgia $\alpha$--$\beta$--$\gamma$ fit)}
+\label{sec:ethos_murgia}
+
+\begin{physbox}{Physics}
+A fast analytic surrogate for ETHOS small-scale suppression of the matter power spectrum. The transfer function follows the Murgia et al.\ (2017) three-parameter fit:
+\begin{equation}
+    T(k) = \left[1 + (\alpha\, k)^\beta \right]^\gamma
+\end{equation}
+applied directly to $P(k)\to T(k)^2 P(k)$ and $\sigma_R \to T(k)\sigma_R$. The defaults $(\beta,\gamma)=(2.24,-4.46)$ match Murgia+ 2017 best-fit values; $\alpha$ [Mpc/h] sets the suppression scale. This model does NOT modify the CMB (no DR sector, no perturbations).
+\end{physbox}
+
+\begin{parambox}{Parameters}
+\begin{tabular}{llll}
+\toprule
+Name & Type & Default & Description \\
+\midrule
+\texttt{alpha\_mpch} & float & 0.0 & Suppression scale $\alpha$ [Mpc/h] (0 = $\Lambda$CDM) \\
+\texttt{beta\_mur} & float & 2.24 & Murgia exponent $\beta$ \\
+\texttt{gamma\_mur} & float & $-4.46$ & Murgia exponent $\gamma$ \\
+\bottomrule
+\end{tabular}
+\end{parambox}
+
+\begin{lstlisting}
+from camb.dark_matter import ETHOSTransferMurgia
+
+pars = camb.CAMBparams()
+pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+pars.set_for_lmax(2500, lens_potential_accuracy=1)
+pars.WantTransfer = True
+pars.set_matter_power(redshifts=[0], kmax=10.0)
+
+pars.DarkMatter = ETHOSTransferMurgia()
+pars.DarkMatter.set_params(alpha_mpch=0.05, beta_mur=2.24, gamma_mur=-4.46)
+results = camb.get_results(pars)
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figures/ethos_transfer_murgia.pdf}
+\caption{ETHOS Transfer (Murgia): The $\alpha$--$\beta$--$\gamma$ fitting form imposes a sharp small-scale cutoff in $P(k)$. Larger $\alpha$ moves the cutoff to larger scales. CMB is unchanged because the model only post-processes the matter transfer function.}
+\end{figure}
+
+\begin{notebox}
+This is a fast surrogate for parameter scans / Lyman-$\alpha$-style constraints; for the full self-consistent ETHOS solution (DAO + CMB effects) use \texttt{DMDR\_ETHOS} (Section~\ref{sec:dmdr_ethos}). For physical ETHOS parameters $(a_{\rm dark}, \xi_{\rm DR}, \ldots)$ mapped to $\alpha$, see \texttt{ETHOSTransferPhysical} below.
+\end{notebox}
+
+
+% -------- ETHOS Transfer (Physical) --------
+\newpage
+\subsection{ETHOS Transfer (Physical surrogate)}
+\label{sec:ethos_physical}
+
+\begin{physbox}{Physics}
+Same Murgia $T(k)$ form as above, but with $\alpha$ derived from physical ETHOS parameters via a power-law fit:
+\begin{equation}
+    \alpha\;[\text{Mpc/h}] = A_0 \left(\frac{a_{\rm dark,n}}{a_{\rm ref}}\right)^{p_a}
+        \left(\frac{\xi_{\rm DR}}{\xi_{\rm ref}}\right)^{p_\xi}
+        \left(\frac{\omega_{\rm dmdr}}{0.12}\right)^{p_\omega}
+\end{equation}
+with default $(A_0, p_a, p_\xi, p_\omega) = (0.5,\,0.25,\,1.0,\,-0.1)$ giving an order-of-magnitude correct mapping for $n_{\rm dark}=2$ (dark Thomson-like opacity). The fit constants are user-exposed so each science application can recalibrate against the full DMDR\_ETHOS solution for its parameter ranges.
+\end{physbox}
+
+\begin{parambox}{Parameters}
+\begin{tabular}{llll}
+\toprule
+Name & Type & Default & Description \\
+\midrule
+\texttt{a\_dark\_n} & float & 0.0 & ETHOS opacity coefficient [Mpc$^{-1}$] \\
+\texttt{xi\_dr} & float & 0.5 & $T_{\rm DR}/T_\gamma$ at recombination \\
+\texttt{omdmdrh2} & float & 0.12 & Interacting DM density $\Omega_{\rm dmdr} h^2$ \\
+\texttt{n\_dark} & int & 2 & Opacity index (advisory) \\
+\texttt{A0\_fit, a\_ref, xi\_ref} & float & 0.5, 1e-4, 0.5 & Fit reference point \\
+\texttt{p\_a, p\_xi, p\_om} & float & 0.25, 1.0, $-0.1$ & Fit exponents \\
+\texttt{beta\_mur, gamma\_mur} & float & 2.24, $-4.46$ & Murgia exponents \\
+\bottomrule
+\end{tabular}
+\end{parambox}
+
+\begin{lstlisting}
+from camb.dark_matter import ETHOSTransferPhysical
+
+pars = camb.CAMBparams()
+pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+pars.set_for_lmax(2500, lens_potential_accuracy=1)
+pars.WantTransfer = True
+pars.set_matter_power(redshifts=[0], kmax=10.0)
+
+pars.DarkMatter = ETHOSTransferPhysical()
+pars.DarkMatter.set_params(a_dark_n=4e-4, xi_dr=0.5, omdmdrh2=0.12)
+results = camb.get_results(pars)
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figures/ethos_transfer_physical.pdf}
+\caption{ETHOS Transfer (Physical): Increasing the ETHOS opacity $a_{\rm dark,n}$ or the dark-radiation temperature ratio $\xi_{\rm DR}$ pushes the suppression scale to larger scales. The default power-law mapping is intentionally a rough fit; recalibrate the $A_0,p_a,p_\xi,p_\omega$ exponents against \texttt{DMDR\_ETHOS} for your target parameter range.}
+\end{figure}
+
+\begin{notebox}
+This is a parameter-scan surrogate. It does NOT reproduce dark acoustic oscillations or CMB effects --- use \texttt{DMDR\_ETHOS} (Section~\ref{sec:dmdr_ethos}) for the full self-consistent calculation.
 \end{notebox}
 
 

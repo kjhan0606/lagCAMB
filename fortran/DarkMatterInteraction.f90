@@ -22,6 +22,7 @@
     procedure :: DragRate_Photon => TDarkMatterModel_DragRate_Photon
     procedure :: SetBackgroundDensities => TDarkMatterModel_SetBackgroundDensities
     procedure :: ModifyNeutrinoParams => TDarkMatterModel_ModifyNeutrinoParams
+    procedure :: TransferFunction => TDarkMatterModel_TransferFunction
     end type TDarkMatterModel
 
     public TDarkMatterModel
@@ -129,5 +130,15 @@
     real(dl), intent(inout) :: Num_Nu_Massless, omnuh2, omch2, H0
     ! Default: do nothing
     end subroutine TDarkMatterModel_ModifyNeutrinoParams
+
+    function TDarkMatterModel_TransferFunction(this, k_h) result(Tk)
+    !Optional small-scale matter power suppression T(k); P(k) is multiplied by T(k)^2.
+    !Default returns 1 (no suppression). Override in models that act as a
+    !phenomenological transfer-function modifier on top of CDM.
+    class(TDarkMatterModel), intent(in) :: this
+    real(dl), intent(in) :: k_h
+    real(dl) :: Tk
+    Tk = 1._dl
+    end function TDarkMatterModel_TransferFunction
 
     end module DarkMatterInteraction

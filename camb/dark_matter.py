@@ -415,6 +415,56 @@ class MultiInteractingDM(DarkMatterModel):
 
 
 @fortran_class
+class ETHOSTransferMurgia(DarkMatterModel):
+    """
+    Murgia et al. 2017 phenomenological ETHOS transfer function applied as
+    post-processing on the matter power spectrum:
+
+        T(k) = [1 + (alpha*k)^beta]^gamma
+
+    P(k) is multiplied by T(k)^2. CMB and background are unchanged. For full
+    self-consistent CMB + matter + dark acoustic oscillations use
+    :class:`DMDR_ETHOS` instead.
+
+    Reference: Murgia, Merle, Viel, Totzauer & Schneider (arXiv:1704.07838).
+
+    Parameters:
+        alpha_mpch: free-streaming scale alpha [Mpc/h]
+        beta_mur: shape parameter beta (default 2.24)
+        gamma_mur: cutoff slope gamma (default -4.46)
+    """
+
+    _fields_ = [
+        ("alpha_mpch", c_double, "Free-streaming scale alpha [Mpc/h]"),
+        ("beta_mur", c_double, "Shape parameter beta"),
+        ("gamma_mur", c_double, "Cutoff slope gamma"),
+    ]
+    _fortran_class_module_ = "ETHOSTransferMurgia"
+    _fortran_class_name_ = "TETHOSTransferMurgia"
+
+    def set_params(self, alpha_mpch=0.0, beta_mur=2.24, gamma_mur=-4.46):
+        """
+        Set Murgia ETHOS transfer function parameters.
+
+        :param alpha_mpch: free-streaming scale [Mpc/h] (0 = LCDM)
+        :param beta_mur: shape parameter
+        :param gamma_mur: cutoff sharpness
+        """
+        self.alpha_mpch = alpha_mpch
+        self.beta_mur = beta_mur
+        self.gamma_mur = gamma_mur
+        self.validate_params()
+
+    def validate_params(self):
+        if self.alpha_mpch < 0:
+            from .baseconfig import CAMBError
+            raise CAMBError("alpha_mpch must be non-negative")
+        if self.beta_mur <= 0:
+            from .baseconfig import CAMBError
+            raise CAMBError("beta_mur must be positive")
+
+
+@fortran_class
 class DMPhotonScattering(DarkMatterModel):
     """
     DM-Photon scattering model (Boddy & Gluscevic 2018).
@@ -454,5 +504,6 @@ F2003Class._class_names.update(
         "fuzzy_dm": FuzzyDM,
         "dm_photon": DMPhotonScattering,
         "multi_idm": MultiInteractingDM,
+        "ethos_transfer_murgia": ETHOSTransferMurgia,
     }
 )

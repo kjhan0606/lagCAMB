@@ -3177,6 +3177,8 @@
                     M%TransferData(s2,ik,State%PK_redshifts_index(nz-zix+1))*k*&
                     const_pi*const_twopi*State%CP%InitPower%ScalarPower(k)
             end do
+            if (allocated(State%CP%DarkMatter)) &
+                PK(ik,:) = PK(ik,:) * State%CP%DarkMatter%TransferFunction(real(M%TransferData(Transfer_kh,ik,1),dl))**2
         end do
 
         if (hnorm) PK=  PK * h**3
@@ -3238,7 +3240,7 @@
     Type(MatterPowerData) :: PK_data
     integer, intent(in), optional :: itf_only
     integer, intent(in), optional :: var1, var2
-    real(dl) :: h, kh, k, power
+    real(dl) :: h, kh, k, power, Tk2
     integer :: ik, nz, itf, itf_start, itf_end, s1, s2
 
     s1 = PresentDefault (transfer_power_var, var1)
@@ -3274,11 +3276,16 @@
             call MatterPowerdata_Free(PK_data)
             return
         end if
+        if (allocated(State%CP%DarkMatter)) then
+            Tk2 = State%CP%DarkMatter%TransferFunction(kh)**2
+        else
+            Tk2 = 1._dl
+        end if
         do itf = 1, nz
             PK_data%matpower(ik,itf) = &
                 log(MTrans%TransferData(s1,ik,itf_start+itf-1)*&
                 MTrans%TransferData(s2,ik,itf_start+itf-1)*k &
-                *const_pi*const_twopi*h**3*power)
+                *const_pi*const_twopi*h**3*power*Tk2)
         end do
     end do
 
@@ -3555,6 +3562,8 @@
         atransfer=MTrans%TransferData(s1,ik,itf)*MTrans%TransferData(s2,ik,itf)
         if (State%CP%NonLinear/=NonLinear_none .and. State%CP%NonLinear/=NonLinear_Lens) &
             atransfer = atransfer* ratio(ik)**2 !only one element, this itf
+        if (allocated(State%CP%DarkMatter)) &
+            atransfer = atransfer * State%CP%DarkMatter%TransferFunction(kh)**2
         matpower(ik) = atransfer*k*const_pi*const_twopi*h**3
         !Put in power spectrum later: transfer functions should be smooth, initial power may not be
     end do
@@ -3647,6 +3656,8 @@
         else
             dsig8 = dsig8*MTrans%TransferData(s2,ik, State%PK_redshifts_index(1:State%CP%Transfer%PK_num_redshifts))
         end if
+        if (allocated(State%CP%DarkMatter)) &
+            dsig8 = dsig8 * State%CP%DarkMatter%TransferFunction(kh)**2
         x= kh *R
         if (x < 1e-2_dl) then
             win = 1._dl - x**2/10

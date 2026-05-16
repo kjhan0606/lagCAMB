@@ -465,6 +465,105 @@ class ETHOSTransferMurgia(DarkMatterModel):
 
 
 @fortran_class
+class ETHOSTransferPhysical(DarkMatterModel):
+    """
+    Physics-parameterized ETHOS transfer-function surrogate.
+
+    Maps physical ETHOS-like parameters (a_dark_n, xi_dr, omega_dmdr_h2)
+    to the Murgia 2017 transfer function via a power-law fit:
+
+        alpha [Mpc/h] = A0 * (a_dark_n / a_ref)^p_a * (xi_dr / xi_ref)^p_xi
+                          * (omdmdrh2 / 0.12)^p_om
+
+    then P(k) is multiplied by [1 + (alpha k)^beta]^(2 gamma).
+
+    The fit constants (A0_fit, a_ref, xi_ref, p_a, p_xi, p_om) are exposed
+    so each application can recalibrate the surrogate against the full
+    :class:`DMDR_ETHOS` Boltzmann solution for its parameter ranges.
+    Defaults give an order-of-magnitude correct mapping for ETHOS
+    n_dark=2.
+
+    This is a fast surrogate for parameter scans. It does not reproduce
+    dark acoustic oscillations or CMB effects -- use :class:`DMDR_ETHOS`
+    for the full self-consistent calculation.
+
+    Parameters:
+        a_dark_n: ETHOS opacity coefficient [Mpc^-1]
+        xi_dr: dark-photon temperature ratio T_DR / T_gamma
+        omdmdrh2: interacting DM density Omega_dmdr h^2
+        n_dark: opacity index (advisory only; 2 = dark-Thomson)
+        A0_fit: alpha [Mpc/h] at the reference point
+        a_ref, xi_ref: reference parameter values for the fit
+        p_a, p_xi, p_om: power-law exponents
+        beta_mur, gamma_mur: Murgia shape parameters
+    """
+
+    _fields_ = [
+        ("a_dark_n", c_double, "ETHOS opacity coefficient [Mpc^-1]"),
+        ("xi_dr", c_double, "T_DR / T_gamma at recomb"),
+        ("omdmdrh2", c_double, "Omega_dmdr h^2"),
+        ("n_dark", c_int, "Opacity power-law index"),
+        ("A0_fit", c_double, "alpha [Mpc/h] at reference point"),
+        ("a_ref", c_double, "Reference a_dark_n [Mpc^-1]"),
+        ("xi_ref", c_double, "Reference xi_dr"),
+        ("p_a", c_double, "Power on a_dark_n"),
+        ("p_xi", c_double, "Power on xi_dr"),
+        ("p_om", c_double, "Power on omega_dmdr_h2"),
+        ("beta_mur", c_double, "Murgia beta"),
+        ("gamma_mur", c_double, "Murgia gamma"),
+        ("alpha_mpch", c_double, "Derived alpha [Mpc/h] (output)"),
+    ]
+    _fortran_class_module_ = "ETHOSTransferPhysical"
+    _fortran_class_name_ = "TETHOSTransferPhysical"
+
+    def set_params(self, a_dark_n=0.0, xi_dr=0.5, omdmdrh2=0.12, n_dark=2,
+                   A0_fit=0.5, a_ref=1e-4, xi_ref=0.5,
+                   p_a=0.25, p_xi=1.0, p_om=-0.1,
+                   beta_mur=2.24, gamma_mur=-4.46):
+        """
+        Set ETHOS physical-surrogate parameters. The derived ``alpha_mpch``
+        is computed here and stored, so it can be read back from the
+        instance after :meth:`set_params`.
+
+        :param a_dark_n: ETHOS opacity coefficient [Mpc^-1] (0 = LCDM)
+        :param xi_dr: dark-photon temperature ratio
+        :param omdmdrh2: Omega_dmdr h^2
+        :param n_dark: opacity power-law index
+        :param A0_fit, a_ref, xi_ref, p_a, p_xi, p_om: surrogate fit constants
+        :param beta_mur, gamma_mur: Murgia shape parameters
+        """
+        self.a_dark_n = a_dark_n
+        self.xi_dr = xi_dr
+        self.omdmdrh2 = omdmdrh2
+        self.n_dark = n_dark
+        self.A0_fit = A0_fit
+        self.a_ref = a_ref
+        self.xi_ref = xi_ref
+        self.p_a = p_a
+        self.p_xi = p_xi
+        self.p_om = p_om
+        self.beta_mur = beta_mur
+        self.gamma_mur = gamma_mur
+        if a_dark_n > 0 and xi_dr > 0:
+            self.alpha_mpch = (A0_fit
+                * (a_dark_n / a_ref) ** p_a
+                * (xi_dr / xi_ref) ** p_xi
+                * (omdmdrh2 / 0.12) ** p_om)
+        else:
+            self.alpha_mpch = 0.0
+        self.validate_params()
+
+    def validate_params(self):
+        from .baseconfig import CAMBError
+        if self.a_dark_n < 0:
+            raise CAMBError("a_dark_n must be non-negative")
+        if self.xi_dr <= 0:
+            raise CAMBError("xi_dr must be positive")
+        if self.beta_mur <= 0:
+            raise CAMBError("beta_mur must be positive")
+
+
+@fortran_class
 class DMPhotonScattering(DarkMatterModel):
     """
     DM-Photon scattering model (Boddy & Gluscevic 2018).
@@ -505,5 +604,6 @@ F2003Class._class_names.update(
         "dm_photon": DMPhotonScattering,
         "multi_idm": MultiInteractingDM,
         "ethos_transfer_murgia": ETHOSTransferMurgia,
+        "ethos_transfer_physical": ETHOSTransferPhysical,
     }
 )

@@ -236,6 +236,53 @@ class EarlyQuintessence(Quintessence):
 
 
 @fortran_class
+class TrackerQuintessence(Quintessence):
+    r"""
+    Tracker / thawing quintessence with a single scalar field and no cosmological constant.
+
+    Two potentials, selected by ``pot_type``:
+
+      * ``pot_type=1`` (Ratra-Peebles): :math:`V(\phi) = A\,\phi^{-\alpha}`
+      * ``pot_type=2`` (exponential):   :math:`V(\phi) = A\,e^{-\lambda\phi}`
+
+    with :math:`\phi` in reduced Planck units. The amplitude :math:`A` is fixed by shooting
+    (bisection on :math:`\ln A`) so that :math:`\Omega_\phi(a=1)` equals the dark-energy budget.
+    The field starts frozen (:math:`d\phi/dN=0`) at ``phi_ini`` at :math:`a=10^{-6}`.
+    """
+
+    _fields_ = (
+        ("pot_type", c_int, "1=Ratra-Peebles (phi^-alpha), 2=exponential (exp(-lam*phi))"),
+        ("alpha", c_double, "Ratra-Peebles exponent (V ~ phi^-alpha)"),
+        ("lam", c_double, "exponential slope (V ~ exp(-lam*phi))"),
+        ("phi_ini", c_double, "initial field value at a=astart (reduced Planck units)"),
+        ("lnA", c_double, "log amplitude in grhocrit units, set by shooting (read-only output)"),
+        ("omega_solved", c_double, "Omega_phi(a=1) achieved by the shooting (diagnostic)"),
+        ("npoints", c_int, "number of points for background integration spacing"),
+        (
+            "fde",
+            AllocatableArrayDouble,
+            "after initialized, the calculated background dark energy fractions at sampled_a",
+        ),
+        ("__ddfde", AllocatableArrayDouble),
+    )
+    _fortran_class_name_ = "TTrackerQuintessence"
+
+    def set_params(self, pot_type=1, alpha=1.0, lam=1.0, phi_ini=0.01):
+        """
+        Set tracker quintessence parameters.
+
+        :param pot_type: 1=Ratra-Peebles (V ~ phi^-alpha), 2=exponential (V ~ exp(-lam*phi))
+        :param alpha: Ratra-Peebles exponent
+        :param lam: exponential slope
+        :param phi_ini: initial (frozen) field value at a=1e-6 in reduced Planck units
+        """
+        self.pot_type = pot_type
+        self.alpha = alpha
+        self.lam = lam
+        self.phi_ini = phi_ini
+
+
+@fortran_class
 class InteractingDE(DarkEnergyEqnOfState):
     """
     Interacting Dark Energy model with DM-DE energy-momentum exchange.

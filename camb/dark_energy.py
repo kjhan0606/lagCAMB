@@ -333,6 +333,57 @@ class InteractingDE(DarkEnergyEqnOfState):
 
 
 @fortran_class
+class KEssence(DarkEnergyEqnOfState):
+    r"""
+    Purely kinetic k-essence dark energy with Lagrangian
+
+    .. math::
+        P(X) = M^4\,(-\tilde X + \tilde X^2), \qquad \tilde X = X/M^4,
+
+    (the overall amplitude :math:`M^4` only fixes the DE budget). The background is
+    algebraic (no shooting): the shift-symmetric equation of motion integrates to
+    :math:`(2\tilde X - 1)\sqrt{\tilde X} = C_0\,a^{-3}` with
+    :math:`C_0 = (2x_0-1)\sqrt{x_0}`, where :math:`x_0 = \tilde X(a{=}1)` is the single
+    shape parameter (must be > 1/2). This gives
+
+    .. math::
+        w(a) = \frac{\tilde X - 1}{3\tilde X - 1}, \qquad
+        c_s^2(a) = \frac{2\tilde X - 1}{6\tilde X - 1},
+
+    with the early limit :math:`w\to 1/3,\ c_s^2\to 1/3` (dark-radiation-like) and the
+    late limit :math:`w\to -1^+,\ c_s^2\to 0^+`. The time-varying rest-frame sound
+    speed makes the DE cluster below the horizon down to its (small) Jeans scale,
+    unlike a :math:`c_s^2=1` fluid.
+
+    Matches the N-body solver convention ``kes_x0`` in scalar_de_commons.f90.
+
+    Usage::
+
+        pars.DarkEnergy = KEssence()
+        pars.DarkEnergy.set_params(x0=0.6)
+    """
+
+    # Cannot declare extra _fields_ here: DarkEnergyEqnOfState ends with unmapped
+    # TCubicSpline fields in Fortran (same constraint as DarkEnergyPPF/InteractingDE).
+    # x0 is pushed to Fortran via the SetKEssenceParams method instead.
+    _fortran_class_module_ = "DarkEnergyKEssence"
+    _fortran_class_name_ = "TKEssence"
+
+    _methods_ = (("SetKEssenceParams", [POINTER(c_double)]),)
+
+    def set_params(self, x0=0.6):
+        """
+        Set purely-kinetic k-essence parameters.
+
+        :param x0: dimensionless kinetic term Xt = X/M^4 today; must be > 1/2
+                   (x0 -> 1/2+ approaches LCDM w=-1; larger x0 => w further from -1).
+        """
+        if x0 <= 0.5:
+            raise CAMBError("KEssence x0 (= Xt today) must be > 1/2 for rho>0, cs2>0")
+        self.f_SetKEssenceParams(byref(c_double(float(x0))))
+
+
+@fortran_class
 class FuzzyDMField(DarkEnergyModel):
     """
     Fuzzy/Ultralight Axion Dark Matter via Klein-Gordon background + EFA perturbations.
@@ -456,6 +507,7 @@ class HorndeskiDE(DarkEnergyEqnOfState):
 F2003Class._class_names.update({
     "fluid": DarkEnergyFluid,
     "ppf": DarkEnergyPPF,
+    "kessence": KEssence,
     "interacting_de": InteractingDE,
     "fuzzy_dm_field": FuzzyDMField,
     "horndeski": HorndeskiDE,

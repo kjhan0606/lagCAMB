@@ -21,6 +21,7 @@ from .baseconfig import (
     F2003Class,
     camblib,
     fortran_class,
+    lib_import,
     np,
     numpy_1d,
     numpy_1d_int,
@@ -268,6 +269,32 @@ class CustomSources(CAMB_Structure):
     )
 
 
+# Direct ctypes bindings for MuSigmaMG tabulated-mode setters (module-global Fortran
+# state; see fortran/MuSigmaMG.f90). MuSigmaMGParams is a POD CAMB_Structure and cannot
+# hold allocatables, so the spline tables live in the Fortran module and are installed
+# through these plain module subroutines (analogous to DarkEnergy SetwTable).
+_MuSigmaMG_SetMuTable = lib_import("MuSigmaMG", "", "MuSigmaMG_SetMuTable")
+_MuSigmaMG_SetMuTable.argtypes = [numpy_1d, numpy_1d, POINTER(c_int)]
+_MuSigmaMG_SetSigmaTable = lib_import("MuSigmaMG", "", "MuSigmaMG_SetSigmaTable")
+_MuSigmaMG_SetSigmaTable.argtypes = [numpy_1d, numpy_1d, POINTER(c_int)]
+_MuSigmaMG_ClearTables = lib_import("MuSigmaMG", "", "MuSigmaMG_ClearTables")
+_MuSigmaMG_ClearTables.argtypes = []
+
+
+def _check_mu_sigma_table(a, vals, name):
+    a = np.ascontiguousarray(a, dtype=np.float64)
+    vals = np.ascontiguousarray(vals, dtype=np.float64)
+    if len(a) != len(vals):
+        raise CAMBValueError(f"MuSigmaMG {name}(a) table: a and {name} arrays differ in length")
+    if len(a) == 0:
+        return a, vals  # empty -> clears the table
+    if np.any(a <= 0):
+        raise CAMBValueError(f"MuSigmaMG {name}(a) table: scale factors must be > 0")
+    if len(a) > 1 and np.any(np.diff(a) <= 0):
+        raise CAMBValueError(f"MuSigmaMG {name}(a) table: scale factors must be strictly increasing")
+    return a, vals
+
+
 class MuSigmaMGParams(CAMB_Structure):
     """
     Phenomenological Modified Gravity parameters (mu-Sigma parameterization).
@@ -291,6 +318,54 @@ class MuSigmaMGParams(CAMB_Structure):
         ("c1", c_double, "mu k-dependence coefficient"),
         ("c2", c_double, "Sigma k-dependence coefficient"),
     )
+
+    def set_mu_a_table(self, a, mu):
+        """
+        Set a tabulated, scale-independent mu(a) (used as a cubic spline in ln a).
+
+        This activates TABULATED mode: mu(a) is read from the table instead of the
+        analytic ``1 + mu_0*Omega_DE(a)`` form. Sigma is unaffected unless a separate
+        Sigma table is also set (see :meth:`set_sigma_a_table`). Outside the tabulated
+        range the value is clamped to the nearest edge (below the smallest a it takes
+        the a->0/first-row value; above the largest a the last-row value). A single-row
+        table is treated as a constant mu.
+
+        Note the table is process-global state (mirrors DarkEnergy SetwTable splines):
+        it affects every subsequent calculation until cleared. Use :meth:`clear_tables`
+        (or pass empty arrays) to return to the analytic path.
+
+        :param a: array of scale factors, strictly increasing and > 0
+        :param mu: array of mu(a) values (same length as a)
+        :return: self
+        """
+        a, mu = _check_mu_sigma_table(a, mu, "mu")
+        _MuSigmaMG_SetMuTable(a, mu, byref(c_int(len(a))))
+        if len(a):
+            self.is_active = True
+        return self
+
+    def set_sigma_a_table(self, a, sigma):
+        """
+        Set a tabulated, scale-independent Sigma(a) (cubic spline in ln a).
+
+        Activates TABULATED mode for the lensing/Weyl modification. Independent of the
+        mu table. Same clamping/extrapolation and process-global semantics as
+        :meth:`set_mu_a_table`.
+
+        :param a: array of scale factors, strictly increasing and > 0
+        :param sigma: array of Sigma(a) values (same length as a)
+        :return: self
+        """
+        a, sigma = _check_mu_sigma_table(a, sigma, "Sigma")
+        _MuSigmaMG_SetSigmaTable(a, sigma, byref(c_int(len(a))))
+        if len(a):
+            self.is_active = True
+        return self
+
+    def clear_tables(self):
+        """Drop any tabulated mu(a)/Sigma(a) and return to the analytic path."""
+        _MuSigmaMG_ClearTables()
+        return self
 
 
 @fortran_class

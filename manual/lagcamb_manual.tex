@@ -343,7 +343,17 @@ A fraction $f_{\rm dcdm}$ of CDM decays into a massive daughter particle and dar
 \begin{equation}
     \text{DM}_{\rm parent} \rightarrow \text{DM}_{\rm daughter}\;(\text{mass fraction } \epsilon) + \text{DR}
 \end{equation}
-The parent density evolves as $\rho_{\rm dcdm}(a) = \rho_0\, a^{-3}\, e^{-\Gamma t(a)}$. The daughter receives a velocity kick $v_{\rm kick} = (1-\epsilon^2)/(2\epsilon)$, and the DR is accumulated from decay products evolving via a truncated Boltzmann hierarchy.
+At decay (radial 2-body kinematics) the daughter gets a kick $v_{\rm kick} = (1-\epsilon^2)/(2\epsilon)$ and DR carries the remaining $(1-\epsilon^2)/2$ of the rest energy. Daughter momentum redshifts as $p_d \propto 1/a$, so the daughter's effective equation of state evolves as
+\begin{equation}
+    w_{\rm eff}(a) = \min\!\Big(\tfrac{1}{3},\ w_{\rm kick}(a_\star/a)^2\Big),
+    \quad w_{\rm kick} = \tfrac{1}{3}v_{\rm kick}^2,
+\end{equation}
+with $a_\star = (3H_0/2\Gamma)^{2/3}$ the typical decay scale factor. The parent decays as $\rho_p(a)\propto a^{-3}e^{-\Gamma t(a)}$. The daughter is evolved as a Hu 1998 GDM warm fluid: $\delta_d$ and $v_d$ obey
+\begin{align}
+    \dot\delta_d &= -(1+w_{\rm eff})(kv_d + kz) - 3\mathcal{H}(c_s^2-w_{\rm eff})\delta_d - \Gamma_a(\rho_p/\rho_d)(\delta_d-\delta_c), \\
+    \dot v_d &= -\mathcal{H}(1-3c_s^2)v_d + \tfrac{c_s^2}{1+w_{\rm eff}}\,k\delta_d - \Gamma_a(\rho_p/\rho_d)v_d,
+\end{align}
+with sound speed $c_s^2 \simeq w_{\rm eff}$. The DR is propagated through a truncated $F_0,\,F_1$ Boltzmann hierarchy with the daughter source. Drag rates are capped at $50\mathcal{H}$ for numerical stability.
 \end{physbox}
 
 \begin{parambox}{Parameters}

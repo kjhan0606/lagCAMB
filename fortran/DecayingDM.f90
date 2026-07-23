@@ -5,24 +5,42 @@
     use classes
     implicit none
 
-    ! Decaying Dark Matter (DCDM) model
-    ! Parent DM decays into massive daughter + dark radiation:
-    !   DM_parent -> DM_daughter + DR
-    ! Background: rho_dcdm' + 3H*rho_dcdm = -Gamma*a*rho_dcdm
-    ! Daughter inherits velocity kick v_kick = (1-epsilon^2)/(2*epsilon)
-    ! DR gains remaining energy
+    ! Decaying Dark Matter (DCDM) with WARM-DAUGHTER Boltzmann fluid.
     !
-    ! References: Blackadder & Koushiappas 2014, Poulin+ 2016, CLASS dcdm module
+    ! Parent CDM -> daughter (massive) + DR (massless):
+    !   m_parent -> m_daughter = epsilon * m_parent  + E_DR = (1-eps^2)/2 * m_p c^2
+    !   daughter kick: v_kick = (1-eps^2)/(2*eps)  (non-rel limit, c=1)
+    !
+    ! Background: rho_parent ~ a^-3 * exp(-Gamma*t).
+    !   rho_daughter_rest = eps * (parent_lost)
+    !   rho_DR ~ a^-4 (sourced over decay history; matter-dom approx gam_inc(5/3,Gamma t))
+    !
+    ! Perturbations (synchronous gauge, fluid moments F_0=delta, F_1=v):
+    !  - Daughter fluid: warm with time-dependent w(a), cs2(a) (Hu 1998 GDM).
+    !    Free-streaming pressure suppresses small-scale clustering.
+    !  - Daughter w_eff(a) interpolates between v_kick^2/3 at creation and
+    !    v_kick^2/3*(a_star/a)^2 at late times (momentum redshift).
+    !  - DR fluid: F_0, F_1 hierarchy with decay source from parent perturbation.
+    !
+    ! State variables (allocated by equations.f90 SetupScalarArrayIndices):
+    !   vc_ix       -> v_d  (daughter velocity)
+    !   dm_ix       -> delta_d  (daughter density perturbation)
+    !   dr_ix       -> F_0  (DR monopole)
+    !   dr_ix+1     -> F_1  (DR dipole = q_r = (4/3) v_r)
+    !
+    ! References: Blackadder & Koushiappas 2014, Audren+ 2014 (CLASS dcdm),
+    !             Poulin+ 2016, Hu 1998 (GDM), Lesgourgues & Tram 2011.
+
     type, extends(TDarkMatterModel) :: TDecayingDM
-        real(dl) :: Gamma_dcdm = 0._dl    ! decay rate [km/s/Mpc] (same units as H0)
-        real(dl) :: epsilon_dcdm = 1._dl  ! mass ratio m_daughter/m_parent (0 < epsilon <= 1)
-        real(dl) :: f_dcdm = 1._dl        ! fraction of CDM that is decaying (0 to 1)
-        ! Cached quantities (set in Init)
-        real(dl) :: Gamma_conf = 0._dl    ! Gamma in conformal time units [Mpc^-1]
-        real(dl) :: v_kick = 0._dl        ! daughter velocity kick (1-eps^2)/(2*eps) in c
-        real(dl) :: grho_dcdm0 = 0._dl    ! initial decaying DM density (8*pi*G*rho_dcdm*a^4 at a=1)
-        real(dl) :: grho_dr_decay0 = 0._dl ! DR from decay density (accumulated)
-        real(dl) :: H0_stored = 67._dl    ! H0 cached for background calculation
+        real(dl) :: Gamma_dcdm = 0._dl    ! decay rate [km/s/Mpc]
+        real(dl) :: epsilon_dcdm = 1._dl  ! mass ratio m_daughter/m_parent
+        real(dl) :: f_dcdm = 1._dl        ! fraction of CDM that decays
+        ! Cached (set in Init)
+        real(dl) :: Gamma_conf = 0._dl    ! Gamma in conformal units [Mpc^-1]
+        real(dl) :: v_kick = 0._dl        ! (1-eps^2)/(2*eps)
+        real(dl) :: w_kick = 0._dl        ! v_kick^2 / 3 (capped at 1/3)
+        real(dl) :: a_star = 1._dl        ! decay scale factor: (3*H0/(2*Gamma))^(2/3)
+        real(dl) :: H0_stored = 67._dl
     contains
     procedure :: ReadParams => TDecayingDM_ReadParams
     procedure, nopass :: PythonClass => TDecayingDM_PythonClass
@@ -34,7 +52,7 @@
     procedure :: PerturbationEvolve => TDecayingDM_PerturbationEvolve
     procedure :: PrintFeedback => TDecayingDM_PrintFeedback
     procedure :: SetBackgroundDensities => TDecayingDM_SetBackgroundDensities
-    procedure :: DecayFactor => TDecayingDM_DecayFactor
+    procedure :: DecayAux => TDecayingDM_DecayAux
     end type TDecayingDM
 
     contains
@@ -66,54 +84,74 @@
 
     end subroutine TDecayingDM_SelfPointer
 
-    function TDecayingDM_DecayFactor(this, a) result(efac)
-    ! exp(-Gamma * t(a)) where t is cosmic time
-    ! For matter domination: t ~ (2/3) * 1/H0 * a^(3/2)
-    ! More accurately, integrate da/(a*H) from 0 to a
-    ! For simplicity, use exponential in conformal time integral:
-    ! integral of Gamma*a*dtau from 0 to a
+    subroutine TDecayingDM_DecayAux(this, a, decay_exp, frac_decayed, x, &
+        w_eff, rho_DR_factor)
+    ! Helper: compute auxiliary quantities at scale factor a.
+    !   decay_exp    = exp(-Gamma*t(a)) (matter-dom approx)
+    !   frac_decayed = 1 - decay_exp
+    !   x            = Gamma*t(a) (dimensionless)
+    !   w_eff        = daughter effective EOS (capped at 1/3)
+    !   rho_DR_factor= dimensionless DR density factor (rho_DR*a^4 / grhodm)
     class(TDecayingDM), intent(in) :: this
     real(dl), intent(in) :: a
-    real(dl) :: efac
+    real(dl), intent(out) :: decay_exp, frac_decayed, x, w_eff, rho_DR_factor
+    real(dl) :: a_dec_eff_sq, gam_inc
+    real(dl), parameter :: G53 = 0.9027452929509336_dl
+    real(dl), parameter :: x0 = 1.281_dl
 
-    ! In radiation domination: a ~ tau, so integral ~ Gamma * tau^2/2
-    ! In matter domination: a ~ tau^2, so integral ~ Gamma * (2/5) * tau^(5/2)
-    ! Use the simple exponential approximation: e^(-Gamma * t)
-    ! where Gamma is already in conformal units
-    ! The proper time integral is done numerically via the background tables
-    efac = 1._dl  ! placeholder, actual decay is tracked in background evolution
+    if (a <= 0._dl .or. this%Gamma_dcdm <= 0._dl) then
+        decay_exp = 1._dl; frac_decayed = 0._dl; x = 0._dl
+        w_eff = 0._dl; rho_DR_factor = 0._dl
+        return
+    end if
 
-    end function TDecayingDM_DecayFactor
+    ! Gamma*t(a) in matter-dom approx: t = (2/3)*H0^-1 * a^(3/2)
+    x = this%Gamma_dcdm / this%H0_stored * (2._dl/3._dl) * a**1.5_dl
+    decay_exp = exp(-x)
+    frac_decayed = 1._dl - decay_exp
+
+    ! Daughter effective EOS: w ~ <v^2>/3 ~ v_kick^2/3 * <(a_c/a)^2>
+    ! For mostly-recent decays (a < a_star): a_c ~ a, so <(a_c/a)^2> -> 1
+    ! For Gamma*t >> 1 (a > a_star): decays happened around a_star, <(a_c/a)^2> -> (a_star/a)^2
+    ! Smooth interpolation:
+    a_dec_eff_sq = min(1._dl, (this%a_star / a)**2)
+    w_eff = min(1._dl/3._dl, this%w_kick * a_dec_eff_sq)
+
+    ! DR density: rho_DR*a^4 = (1-eps^2)/2 * f * grhodm0 * a_star * gam_inc(5/3, Gamma t)
+    ! (matter-dom approx; 1-eps^2)/2 is energy fraction lost to DR per decay)
+    if (x > 1.e-30_dl) then
+        gam_inc = G53 * (1._dl - exp(-(x/x0)**(5._dl/3._dl)))
+        ! Dimensionless factor: rho_DR*a^2 / grhodm = (1-eps^2)/2 * f * a_star * gam_inc / a^2
+        rho_DR_factor = (1._dl - this%epsilon_dcdm**2) * 0.5_dl * this%f_dcdm * &
+                        this%a_star * gam_inc
+    else
+        rho_DR_factor = 0._dl
+    end if
+
+    end subroutine TDecayingDM_DecayAux
 
     subroutine TDecayingDM_Init(this, State)
     class(TDecayingDM), intent(inout) :: this
     class(TCAMBdata), intent(in), target :: State
-    real(dl) :: h2
 
     this%is_standard_cdm = (this%Gamma_dcdm == 0._dl .or. this%f_dcdm == 0._dl)
 
     if (.not. this%is_standard_cdm) then
-        ! Convert Gamma from km/s/Mpc to Mpc^-1 (physical time rate)
-        ! Same as H0 conversion: H0 [Mpc^-1] = H0 [km/s/Mpc] * 1000 / c
         this%Gamma_conf = this%Gamma_dcdm * 1000._dl / c
-        ! v_kick = (1 - epsilon^2) / (2 * epsilon)
-        this%v_kick = (1._dl - this%epsilon_dcdm**2) / (2._dl * this%epsilon_dcdm)
+        this%v_kick = (1._dl - this%epsilon_dcdm**2) / &
+                      (2._dl * max(this%epsilon_dcdm, 1.e-6_dl))
+        this%w_kick = this%v_kick**2 / 3._dl  ! NR limit; capped at 1/3 inside DecayAux
 
-        ! CDM velocity for daughter particles
         this%has_cdm_velocity = .true.
-        ! Equations: v_daughter (1) + delta_dcdm (1) + delta_daughter (1) + DR_F0 (1) + DR_F1 (1) + DR_F2 (1)
-        ! Minimal: v_daughter + delta_daughter + DR 3 moments = 5
-        ! Simpler approach: track delta_dcdm_eff and v_dcdm as fluid + DR hierarchy
-        ! We use: v_c (CDM velocity, 1) + DR hierarchy (lmax+1)
-        this%num_dr_equations = 3  ! DR F0, F1, F2 (truncated)
-        this%num_perturb_equations = 1 + this%num_dr_equations  ! v_c + DR
+        ! State allocation: vc_ix(1) + dm_ix(1) + dr_ix(2) = 4 slots
+        this%num_dr_equations = 2  ! DR F_0, F_1 only (no F_2 = no anisotropic stress)
+        this%num_perturb_equations = 1 + 1 + this%num_dr_equations
 
         select type(S => State)
         class is (CAMBdata)
-            h2 = (S%CP%H0/100._dl)**2
             this%H0_stored = S%CP%H0
-            ! The decaying fraction of CDM
-            this%grho_dcdm0 = S%grhocrit * S%CP%omch2 / h2 * this%f_dcdm
+            ! Decay scale factor (3 H0 / 2 Gamma)^(2/3); the a at which Gamma*t ~ 1
+            this%a_star = (1.5_dl * S%CP%H0 / max(this%Gamma_dcdm, 1.e-30_dl))**(2._dl/3._dl)
         end select
     else
         this%has_cdm_velocity = .false.
@@ -124,11 +162,15 @@
     end subroutine TDecayingDM_Init
 
     subroutine TDecayingDM_BackgroundDensityAndPressure(this, grhodm, a, grhodm_t, gpres_dm)
+    ! Returns total dark-matter-sector density in 8*pi*G*rho*a^2 units:
+    ! (1) Stable CDM + (2) surviving parent + (3) daughter rest mass + (4) DR
+    ! All wrapped into grhodm_t so that the Hubble rate stays correct.
     class(TDecayingDM), intent(inout) :: this
     real(dl), intent(in) :: grhodm, a
     real(dl), intent(out) :: grhodm_t
     real(dl), optional, intent(out) :: gpres_dm
-    real(dl) :: decay_exp, rho_stable, rho_decay, a_Gamma_t
+    real(dl) :: decay_exp, frac_decayed, x, w_eff, rho_DR_factor
+    real(dl) :: rho_stable_total, grhoDR_t
 
     if (a <= 0._dl) then
         grhodm_t = 0._dl
@@ -137,216 +179,212 @@
     end if
 
     if (this%is_standard_cdm) then
-        ! Standard CDM: rho ~ a^-3
         grhodm_t = grhodm / a
         if (present(gpres_dm)) gpres_dm = 0._dl
         return
     end if
 
-    ! Decaying DM: rho_dcdm(a) = rho_dcdm,0 * a^-3 * exp(-Gamma * t(a))
-    ! For the exponential factor, use Gamma*t ~ Gamma/(H0) * integral(da'/(a'*E(a')))
-    ! Approximate: in matter domination, t ~ (2/3H0) * a^(3/2)
-    ! So Gamma*t ~ (2/3) * (Gamma/H0) * a^(3/2)
-    ! This is a reasonable approximation for z < 1000
-    a_Gamma_t = (2._dl/3._dl) * this%Gamma_conf * a**(1.5_dl) / &
-        sqrt(grhodm * 3._dl) * grhodm  ! approximate
-    ! More robust: use Gamma * conformal_time / a (since dt = a*dtau, and H ~ 1/tau in RD)
-    ! Actually, let's use a simpler and correct approach:
-    ! Gamma_conf was set so that Gamma [1/Mpc] in cosmic time
-    ! The proper approach: exp(-Gamma * t) where t is cosmic time
-    ! In CAMB units: Gamma [Mpc^-1 cosmic time], and t comes from integration
-    ! Simple exponential: exp(-Gamma/H0 * f(a)) where f(a) is a dimensionless time integral
+    call this%DecayAux(a, decay_exp, frac_decayed, x, w_eff, rho_DR_factor)
 
-    ! Use the approximation valid across epochs:
-    ! Gamma*t(a) ~ Gamma_conf * a / adotoa, roughly
-    ! Better: just use rho ~ a^{-3} * exp(-Gamma_eff * a^alpha) with alpha tuned
-    ! For now, use direct exponential with cosmic time approximation
-    ! decay_exp = exp(-Gamma * t(a))
-    ! In radiation era: a ~ (2H_rad t)^(1/2), t = a^2/(2H_rad)
-    ! In matter era: a ~ (3H_mat t/2)^(2/3), t = (2/3)*a^(3/2)/H_mat
-    ! General: Gamma*t ~ Gamma_conf * integral_0^a da'/(a'*H(a'))
+    ! Total rest-mass-like density / a (matter-like):
+    !   (1-f)*grhodm + f*(decay_exp + eps*(1-decay_exp))*grhodm
+    ! = grhodm * [1 - f*(1-eps)*(1-decay_exp)]
+    rho_stable_total = grhodm / a * &
+        (1._dl - this%f_dcdm * (1._dl - this%epsilon_dcdm) * frac_decayed)
 
-    ! For the background, we track the modification to total CDM density
-    ! grhodm already includes the full CDM budget (stable + decaying parts)
-    ! The stable fraction is (1-f_dcdm)*grhodm, scaling as a^-3
-    ! The decaying fraction: f_dcdm*grhodm * exp(-Gamma*t(a)) * a^-3
-    ! We approximate: t(a) ~ tau_approx(a) where tau is conformal time
-    ! For background only, we modify the effective grhodm_t
+    ! DR contribution (radiation-like, scales as 1/a^2 in 8piG units):
+    grhoDR_t = grhodm * rho_DR_factor / (a*a)
 
-    ! Simple approach: assume Gamma << H at early times (valid for Gamma ~ H0)
-    ! Then rho_dcdm ~ rho_cdm * exp(-Gamma*t) and the exponential only matters at late times
-    ! In matter domination: t = (2/3)*H0^{-1}*a^{3/2}/sqrt(Omega_m)
-    ! Gamma*t = (2/3)*(Gamma/H0)*a^{3/2}/sqrt(Omega_m)
-    ! Using Gamma_conf which is Gamma/(c/1000/Mpc):
-    ! Actually let's be more careful. this%Gamma_dcdm is in km/s/Mpc.
-    ! H0 is also in km/s/Mpc. So Gamma/H0 is dimensionless.
-    ! t(a) in matter domination = (2/(3*H0)) * a^{3/2} (for Omega_m=1 approx)
+    grhodm_t = rho_stable_total + grhoDR_t
 
-    ! Use Gamma/H0 ratio for time calculation (H0 cached from Init)
-    a_Gamma_t = this%Gamma_dcdm / this%H0_stored * 2._dl/3._dl * a**1.5_dl
-
-    decay_exp = exp(-a_Gamma_t)
-
-    ! Total DM density: stable part + surviving decaying part + daughter (NR)
-    ! plus DR contribution from rest-mass loss in (1-eps) fraction.
-    !
-    ! DR redshifts as a^-4 from emission time. In matter-dominated approx,
-    ! rho_DR(a) * a^4 = (1-eps)*f*rho_cdm0 * a_star * gamma(5/3, Gamma*t(a))
-    ! where a_star = (3*H0/(2*Gamma))^(2/3).
-    ! gamma(5/3,x) is approximated by a smooth bridge between small-x and Gamma(5/3).
-    block
-        real(dl) :: a_star, gam_inc, x, x0, G53
-        real(dl) :: grhoDR
-        G53 = 0.9027452929509336_dl   ! Gamma(5/3)
-        x0 = 1.281_dl                  ! match small-x leading slope
-        x = a_Gamma_t
-        if (this%Gamma_dcdm > 0._dl .and. x > 1e-30_dl) then
-            gam_inc = G53 * (1._dl - exp(-(x/x0)**(5._dl/3._dl)))
-            a_star = (1.5_dl * this%H0_stored / this%Gamma_dcdm)**(2._dl/3._dl)
-            ! In CAMB convention 8*pi*G*rho*a^2:
-            ! grhoDR_t = (1-eps)*f*grhodm * a_star * gam_inc / a^2
-            grhoDR = (1._dl - this%epsilon_dcdm) * this%f_dcdm * grhodm * &
-                     a_star * gam_inc / a**2
-        else
-            grhoDR = 0._dl
-        end if
-        rho_stable = grhodm / a * &
-            (1._dl - this%f_dcdm * (1._dl - this%epsilon_dcdm) * (1._dl - decay_exp))
-        grhodm_t = rho_stable + grhoDR
-    end block
-
-    if (present(gpres_dm)) gpres_dm = 0._dl
+    if (present(gpres_dm)) then
+        ! Pressure from daughter (warm) + DR (relativistic).
+        ! Daughter pressure = w_eff * rho_d_rest
+        gpres_dm = w_eff * grhodm / a * this%f_dcdm * this%epsilon_dcdm * frac_decayed &
+                 + grhoDR_t / 3._dl
+    end if
 
     end subroutine TDecayingDM_BackgroundDensityAndPressure
 
     subroutine TDecayingDM_SetBackgroundDensities(this, grhocrit, grhor, h2, grhodmdr, grhodr)
-    ! Set the DR density from decay products (massless)
-    ! This is called once during initialization, so we estimate the DR density
-    ! The DR from decay accumulates over cosmic time
     class(TDecayingDM), intent(in) :: this
     real(dl), intent(in) :: grhocrit, grhor, h2
     real(dl), intent(out) :: grhodmdr, grhodr
 
-    ! No separate interacting DM density pool (decay modifies standard CDM)
+    ! No separate density pool; daughter/DR tracked via BackgroundDensityAndPressure.
     grhodmdr = 0._dl
-    ! DR from decay is subdominant for Gamma << H0; set to zero as leading order
-    ! The actual DR contribution is computed dynamically via BackgroundDensityAndPressure
     grhodr = 0._dl
 
     end subroutine TDecayingDM_SetBackgroundDensities
 
     subroutine TDecayingDM_PerturbedStressEnergy(this, dgrhoe, dgqe, &
         a, dgq, dgrho, grho, grhoc_t, adotoa, k, ay, ayprime, dm_ix, dr_ix, vc_ix)
+    ! Add daughter and DR perturbations on top of the implicit grhoc_t*clxc weighting.
+    ! Since grhoc_t (from BackgroundDensityAndPressure) includes daughter+DR rest-mass
+    ! density, the framework's dgrho_matter = grhoc_t*clxc effectively assumes
+    ! delta_d = delta_DR = clxc. We correct this by adding:
+    !   dgrho_e = -(rho_d + rho_DR)*clxc + rho_d*delta_d + rho_DR*F0_DR
+    !   dgq_e   = rho_d*v_d + rho_DR*F1_DR
     class(TDecayingDM), intent(inout) :: this
     real(dl), intent(out) :: dgrhoe, dgqe
     real(dl), intent(in) :: a, dgq, dgrho, grho, grhoc_t, adotoa, k
     real(dl), intent(in) :: ay(*)
     real(dl), intent(inout) :: ayprime(*)
     integer, intent(in) :: dm_ix, dr_ix, vc_ix
-    real(dl) :: grhodr_t, F0_dr, F1_dr
+    real(dl) :: decay_exp, frac_decayed, x, w_eff, rho_DR_factor
+    real(dl) :: grho_d_t, grho_DR_t, grhodm_total, clxc_local
+    real(dl) :: delta_d, v_d, F0_DR, F1_DR
+    real(dl) :: grhodm_orig
 
     if (this%is_standard_cdm) then
-        dgrhoe = 0
-        dgqe = 0
-        return
+        dgrhoe = 0; dgqe = 0; return
+    end if
+    if (dm_ix <= 0 .or. dr_ix <= 0 .or. vc_ix <= 0) then
+        dgrhoe = 0; dgqe = 0; return
     end if
 
-    dgrhoe = 0._dl
-    dgqe = 0._dl
+    call this%DecayAux(a, decay_exp, frac_decayed, x, w_eff, rho_DR_factor)
 
-    ! CDM velocity contribution (daughter velocity small, treated as cold)
-    if (vc_ix > 0) then
-        dgqe = dgqe + grhoc_t * this%f_dcdm * ay(vc_ix)
+    ! Need the original grhodm (constant) -- recover by undoing the (1 - ...) factor:
+    !   grhoc_t = grhodm/a * (1 - f*(1-eps)*frac) + grhodm * rho_DR_factor / a^2
+    ! Solve numerically: grhodm = (grhoc_t - rho_DR_t) * a / (1 - f*(1-eps)*frac)
+    grho_DR_t = 0._dl
+    if (rho_DR_factor > 0._dl) then
+        ! Two-step: compute grhodm_orig assuming grho_DR_t = 0 first, then refine.
+        grhodm_orig = grhoc_t * a / max(1._dl - this%f_dcdm*(1._dl - this%epsilon_dcdm)*frac_decayed, 1.e-30_dl)
+        grho_DR_t = grhodm_orig * rho_DR_factor / (a*a)
+        ! One iteration to refine
+        grhodm_orig = (grhoc_t - grho_DR_t) * a / &
+            max(1._dl - this%f_dcdm*(1._dl - this%epsilon_dcdm)*frac_decayed, 1.e-30_dl)
+        grho_DR_t = grhodm_orig * rho_DR_factor / (a*a)
+    else
+        grhodm_orig = grhoc_t * a / &
+            max(1._dl - this%f_dcdm*(1._dl - this%epsilon_dcdm)*frac_decayed, 1.e-30_dl)
     end if
 
-    ! DR perturbation source omitted: background DR is tracked in
-    ! BackgroundDensityAndPressure. Adding a free positive dgrhoe source
-    ! without proper conservation against CDM drives sigma8 the wrong way.
-    if (.false. .and. dr_ix > 0) then
-        F0_dr = ay(dr_ix); F1_dr = ay(dr_ix + 1); grhodr_t = 0._dl
-    end if
+    ! Daughter rest-mass density (matter-like, 1/a):
+    grho_d_t = grhodm_orig / a * this%f_dcdm * this%epsilon_dcdm * frac_decayed
+
+    ! Read perturbation variables
+    delta_d = ay(dm_ix)
+    v_d     = ay(vc_ix)
+    F0_DR   = ay(dr_ix)
+    F1_DR   = ay(dr_ix + 1)
+
+    ! clxc is the cold-CDM (parent + stable) perturbation; we pull it from the
+    ! global state via the standard ix_clxc=2 slot (CAMB convention).
+    clxc_local = ay(2)
+
+    ! Correction: dgrho framework uses grhoc_t*clxc, which implicitly weights
+    ! the daughter+DR by clxc too. Subtract that and add proper weightings.
+    dgrhoe = -(grho_d_t + grho_DR_t) * clxc_local &
+           + grho_d_t * (1._dl + w_eff) * delta_d &
+           + grho_DR_t * F0_DR
+
+    ! dgq: cold parent has v_c=0 in synch gauge (not added implicitly here);
+    ! daughter contributes ~ rho_d*(1+w)*v_d; DR contributes rho_DR*F1.
+    dgqe = grho_d_t * (1._dl + w_eff) * v_d + grho_DR_t * F1_DR
 
     end subroutine TDecayingDM_PerturbedStressEnergy
 
     subroutine TDecayingDM_PerturbationInitial(this, y, a, tau, k, dm_ix, dr_ix, vc_ix)
+    ! Adiabatic IC: daughter inherits parent's perturbation; DR starts with
+    ! standard radiation IC. v_d = 0 initially.
     class(TDecayingDM), intent(in) :: this
     real(dl), intent(inout) :: y(:)
     real(dl), intent(in) :: a, tau, k
     integer, intent(in) :: dm_ix, dr_ix, vc_ix
+    real(dl) :: x2, x3
 
     if (this%is_standard_cdm) return
 
-    ! Daughter velocity starts at zero (adiabatic IC)
-    if (vc_ix > 0) y(vc_ix) = 0._dl
+    ! Daughter perturbations: inherit parent's adiabatic IC.
+    x2 = (k*tau)**2
+    if (vc_ix > 0) y(vc_ix) = 0._dl          ! v_d = 0 (parent at rest in synch)
+    if (dm_ix > 0) y(dm_ix) = -x2 / 2._dl * 0.75_dl  ! delta_d = clxc leading order
 
-    ! dm_ix is allocated by SetupScalarArrayIndices when num_dr_equations > 0
-    ! For DecayingDM we don't use it, but must initialize to 0
-    if (dm_ix > 0) y(dm_ix) = 0._dl
-
-    ! DR from decay: initially zero (no decay products yet)
+    ! DR radiation IC (synchronous gauge, leading order in x = k*tau)
     if (dr_ix > 0) then
-        y(dr_ix) = 0._dl      ! F0
-        y(dr_ix + 1) = 0._dl  ! F1
-        y(dr_ix + 2) = 0._dl  ! F2
+        x3 = (k*tau)**3
+        y(dr_ix) = -x2 / 3._dl       ! F_0
+        y(dr_ix + 1) = -x3 / 27._dl  ! F_1 = qr
     end if
 
     end subroutine TDecayingDM_PerturbationInitial
 
     subroutine TDecayingDM_PerturbationEvolve(this, ayprime, a, adotoa, k, z, y, &
         dm_ix, dr_ix, vc_ix, clxc, vb, grhoc_t, grhob_t, sigma, high_ktau_dr)
+    ! Evolve daughter fluid (delta_d, v_d) and DR hierarchy (F_0, F_1).
+    ! Daughter: Hu 1998 GDM with time-dependent w(a), cs2(a) and decay source.
+    ! DR: radiation hierarchy with decay source proportional to parent perturbation.
     class(TDecayingDM), intent(in) :: this
     real(dl), intent(inout) :: ayprime(:)
     real(dl), intent(in) :: a, adotoa, k, z, y(:)
     integer, intent(in) :: dm_ix, dr_ix, vc_ix
     real(dl), intent(in) :: clxc, vb, grhoc_t, grhob_t, sigma
     logical, intent(in), optional :: high_ktau_dr
-    real(dl) :: vc, Gamma_a, grhodr_t
-    real(dl) :: F0, F1, F2
+    real(dl) :: decay_exp, frac_decayed, x, w_eff, rho_DR_factor
+    real(dl) :: Gamma_a, Gamma_drag_d, Gamma_drag_DR
+    real(dl) :: delta_d, v_d, F0_DR, F1_DR
+    real(dl) :: cs2_d, cs2_minus_w
+    real(dl) :: rho_p_over_d, rho_p_over_DR
+    real(dl) :: regul
 
     if (this%is_standard_cdm) return
-    if (vc_ix <= 0 .or. dr_ix <= 0) return
+    if (dm_ix <= 0 .or. dr_ix <= 0 .or. vc_ix <= 0) return
 
-    ! dm_ix is allocated but unused for DecayingDM; must set derivative to 0
-    if (dm_ix > 0) ayprime(dm_ix) = 0._dl
+    call this%DecayAux(a, decay_exp, frac_decayed, x, w_eff, rho_DR_factor)
 
-    ! Gamma_a = Gamma_phys * a (conformal time rate: Gamma * dt/dtau = Gamma * a)
+    ! Conformal-time decay rate: Gamma_phys * dt/dtau = Gamma_conf * a
     Gamma_a = this%Gamma_conf * a
 
-    vc = y(vc_ix)
-    F0 = y(dr_ix)
-    F1 = y(dr_ix + 1)
-    F2 = y(dr_ix + 2)
+    ! Drag rates: source = (Gamma_a * rho_parent / rho_X) * (delta_p - delta_X)
+    ! For daughter (rest mass): rho_p/rho_d_rest = decay_exp / (eps * frac_decayed)
+    ! For DR: rho_p/rho_DR (massless) is much larger but the rate is bounded by
+    ! Gamma_a (we cap drag at 50*adotoa for numerical stability, same threshold as CAMB TCA).
+    regul = max(frac_decayed, 1.e-6_dl)
+    rho_p_over_d  = decay_exp / (max(this%epsilon_dcdm, 1.e-6_dl) * regul)
+    Gamma_drag_d  = Gamma_a * rho_p_over_d
+    Gamma_drag_d  = min(Gamma_drag_d, 50._dl * max(adotoa, 1.e-30_dl))
 
-    ! Daughter CDM velocity equation:
-    ! v_daughter' = -aH*v_daughter + Gamma*a * v_kick * (rho_dcdm/rho_daughter) * delta_direction
-    ! In the limit where daughter quickly becomes non-relativistic:
-    ! v_c' = -aH * v_c + source from decay (kick velocity averaged over directions)
-    ! The kick provides a drag-like effect on the effective CDM
-    ! For perturbations: v_c' = -aH*v_c - Gamma_a * v_kick * clxc (velocity source from decay)
-    ayprime(vc_ix) = -adotoa * vc
+    if (rho_DR_factor > 1.e-30_dl) then
+        ! For DR: source = Gamma_a*(1-eps^2)/2 * rho_p / rho_DR; using DR conv F0 = delta_r.
+        ! Approx normalization: source ~ Gamma_a * decay_exp / max(rho_DR_factor/a^2 ... ).
+        ! Simpler: rate-cap directly.
+        Gamma_drag_DR = Gamma_a * decay_exp / max(rho_DR_factor, 1.e-30_dl) * a*a * 0.5_dl
+        Gamma_drag_DR = min(Gamma_drag_DR, 50._dl * max(adotoa, 1.e-30_dl))
+    else
+        Gamma_drag_DR = 0._dl
+    end if
 
-    ! DR hierarchy from decay products
-    ! Source term: S = Gamma_a * rho_dcdm * (1-epsilon) * (perturbation)
-    ! DR density equation: F0' = -k*F1 + source
-    ! Source is proportional to Gamma * rho_dcdm * delta_dcdm / rho_dr
-    ! Since rho_dr from decay is small, normalize properly
+    delta_d = y(dm_ix)
+    v_d     = y(vc_ix)
+    F0_DR   = y(dr_ix)
+    F1_DR   = y(dr_ix + 1)
 
-    ! DR from decay: evolve as massless radiation with source
-    ! F0' = -k*F1 + Gamma_a * (1-epsilon) * clxc * (grhoc_t / max(grhodr_t, 1e-30))
-    ! For stability, use a simplified source that doesn't blow up
-    grhodr_t = grhoc_t * this%f_dcdm * (1._dl - this%epsilon_dcdm) * &
-        Gamma_a / max(adotoa, 1e-30_dl)
+    cs2_d = w_eff                 ! adiabatic-ish; cs2 = w for simple warm fluid
+    cs2_minus_w = 0._dl           ! adiabatic limit
 
-    ! F0' = -k*F1 + Gamma_a*(1-epsilon)*clxc * rho_dcdm/rho_dr (source from decay)
-    ! Normalize: source ~ Gamma_a * clxc (the perturbation source)
-    ayprime(dr_ix) = -k * F1 + Gamma_a * (1._dl - this%epsilon_dcdm) * clxc
+    ! ============ Daughter fluid (Hu 1998 GDM, F_2 -> 0 closure) ============
+    ! delta_d' = -(1+w)*(k*v_d + k*z) - 3H*(cs2-w)*delta_d - Gamma_drag*(delta_d - clxc)
+    ayprime(dm_ix) = -(1._dl + w_eff) * (k * v_d + k * z) &
+                    - 3._dl * adotoa * cs2_minus_w * delta_d &
+                    - Gamma_drag_d * (delta_d - clxc)
 
-    ! F1' = k/3 * (F0 - 2*F2)
-    ayprime(dr_ix + 1) = k / 3._dl * (F0 - 2._dl * F2)
+    ! v_d' = -H*(1-3*cs2)*v_d + cs2*k*delta_d/(1+w) - Gamma_drag*v_d
+    !       (parent v_p = 0 in synch gauge -> drag is one-sided)
+    ayprime(vc_ix) = -adotoa * (1._dl - 3._dl * cs2_d) * v_d &
+                   + cs2_d * k * delta_d / max(1._dl + w_eff, 1.e-30_dl) &
+                   - Gamma_drag_d * v_d
 
-    ! F2 truncation: F2' = k/5 * (2*F1) - 3*adotoa*F2 (approx 3/tau in RD)
-    ayprime(dr_ix + 2) = 2._dl * k / 5._dl * F1 - 3._dl * adotoa * F2 &
-        + 8._dl / 15._dl * k * sigma
+    ! ============ DR hierarchy (massless, decay-sourced) ============
+    ! F_0' = -(4/3)*k*z - k*F_1 + Gamma_drag_DR*(clxc - F_0)
+    ayprime(dr_ix) = -(4._dl/3._dl) * k * z - k * F1_DR &
+                   + Gamma_drag_DR * (clxc - F0_DR)
+
+    ! F_1' = k/3 * F_0 - Gamma_drag_DR * F_1
+    !   (closure: F_2 = 0; full hierarchy would have +8/15*k*sigma source via F_2)
+    ayprime(dr_ix + 1) = k / 3._dl * F0_DR - Gamma_drag_DR * F1_DR
 
     end subroutine TDecayingDM_PerturbationEvolve
 
@@ -355,9 +393,11 @@
     integer, intent(in) :: FeedbackLevel
 
     if (FeedbackLevel > 0) then
-        write(*,'("Decaying DM: Gamma = ",ES12.4," km/s/Mpc")') this%Gamma_dcdm
-        write(*,'("             epsilon = ",F8.5,", f_dcdm = ",F8.5)') &
+        write(*,'("Decaying DM (warm daughter): Gamma = ",ES12.4," km/s/Mpc")') this%Gamma_dcdm
+        write(*,'("    epsilon = ",F8.5,", f_dcdm = ",F8.5)') &
             this%epsilon_dcdm, this%f_dcdm
+        write(*,'("    v_kick = ",ES10.3,"  w_kick = ",ES10.3, "  a_star = ",ES10.3)') &
+            this%v_kick, this%w_kick, this%a_star
     end if
 
     end subroutine TDecayingDM_PrintFeedback

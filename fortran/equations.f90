@@ -2285,6 +2285,7 @@
     use DMNeutrino, only: TDMNeutrinoScattering
     use DMPhoton, only: TDMPhotonScattering
     use InteractingDE, only: TInteractingDE, ide_Q_H_rho_de, ide_Q_H_rho_c, ide_Q_H_rho_tot
+    use DarkEnergyRunningVacuum, only: TRunningVacuum
     use HorndeskiDE, only: THorndeskiDE
     implicit none
     type(EvolutionVars) EV
@@ -2577,6 +2578,21 @@
                         ayprime(EV%w_ix) = ayprime(EV%w_ix) + xi_src * (clxc - delta_de_val)
                     end select
                 end block
+            end if
+        end select
+    end if
+
+    ! Running Vacuum (RVM): the smooth vacuum feeds unclustered particles into
+    ! the CDM (Q = -rho_L' > 0 for nu>0), diluting the CDM density contrast. The
+    ! perturbed CDM continuity gains (rho_L'/rho_c) delta_c, and with
+    ! rho_L' = d rho_L/dtau = -3 nu (a'/a) rho_c this is -3 nu adotoa delta_c
+    ! (delta rho_L = 0, no momentum transfer, so theta_c is unchanged).
+    ! Ref: Gomez-Valent & Sola 2015 (arXiv:1409.7048).
+    if (.not. EV%is_cosmological_constant) then
+        select type(DE => State%CP%DarkEnergy)
+        type is (TRunningVacuum)
+            if (DE%nu /= 0._dl) then
+                ayprime(ix_clxc) = ayprime(ix_clxc) - 3._dl * DE%nu * adotoa * clxc
             end if
         end select
     end if

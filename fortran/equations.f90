@@ -1897,8 +1897,8 @@
     real(dl) a,a2, iqg, rhomass,a_massive, ep
     integer l,i, nu_i, j, ind
     integer, parameter :: i_clxg=1,i_clxr=2,i_clxc=3, i_clxb=4, &
-        i_qg=5,i_qr=6,i_vb=7,i_pir=8, i_eta=9, i_aj3r=10,i_clxde=11,i_vde=12
-    integer, parameter :: i_max = i_vde
+        i_qg=5,i_qr=6,i_vb=7,i_pir=8, i_eta=9, i_aj3r=10,i_clxde=11,i_vde=12, i_vc_cq=13
+    integer, parameter :: i_max = i_vc_cq   !i_vc_cq: coupled-quintessence CDM velocity (3rd DE slot, adiabatic IC 0)
     real(dl) initv(6,1:i_max), initvec(1:i_max)
 
     nullify(EV%OutputTransfer) !Should not be needed, but avoids issues in ifort 14
@@ -2286,6 +2286,7 @@
     use DMPhoton, only: TDMPhotonScattering
     use InteractingDE, only: TInteractingDE, ide_Q_H_rho_de, ide_Q_H_rho_c, ide_Q_H_rho_tot
     use HorndeskiDE, only: THorndeskiDE
+    use Quintessence, only: TCoupledQuintessence
     implicit none
     type(EvolutionVars) EV
     integer n,nu_i
@@ -2475,6 +2476,15 @@
         end if
     end if
 
+    ! Coupled quintessence: the CDM now carries a velocity theta_c=k*v_c (fifth force),
+    ! contributing to the total momentum (rho+p)v. v_c is stored in the 3rd DE slot (w_ix+2).
+    if (.not. EV%is_cosmological_constant .and. EV%w_ix > 0) then
+        select type(DE => State%CP%DarkEnergy)
+        type is (TCoupledQuintessence)
+            if (DE%beta /= 0._dl) dgq = dgq + grhoc_t*ay(EV%w_ix+2)
+        end select
+    end if
+
     !  Get sigma (shear) and z from the constraints
     ! have to get z from eta for numerical stability
     z=(0.5_dl*dgrho/k + etak)/adotoa
@@ -2576,6 +2586,41 @@
                         xi_src = sign(xi_src, DE%xi_ide)
                         ayprime(EV%w_ix) = ayprime(EV%w_ix) + xi_src * (clxc - delta_de_val)
                     end select
+                end block
+            end if
+        end select
+    end if
+
+    ! Coupled quintessence (Amendola m_dm ~ exp(-beta*phi)): fifth force + mass-running coupling.
+    ! Synchronous gauge, conformal time (prime = d/dtau), reduced-Planck kappa=1. Derived from the
+    ! covariant Q^mu = beta*rho_c*grad^mu(phi) (which reproduces rho_c ~ a^-3 exp(-beta*phi) and the
+    ! KG source +beta*rho_c). With v_c = theta_c/k (CAMB velocity convention, as vb), h'/2 = k*z:
+    !   delta_c'  = -(theta_c + h'/2) - beta*delta_phi'   (base already set clxcdot=-k*z=-h'/2)
+    !   theta_c'  = -(aH - beta*phi') theta_c + beta*k^2*delta_phi   => v_c' with theta_c=k*v_c
+    !   delta_phi'' += +beta*grhoc_t*delta_c              (perturbed KG source; grhoc_t=8piG*rho_c*a^2
+    !                                                      already includes the coupled correction)
+    ! The delta_phi' sign in delta_c' comes from delta_c = delta_n/n - beta*delta_phi (running mass);
+    ! the +sign of the field source is required for an attractive fifth force (G_eff=G(1+2 beta^2)).
+    if (.not. EV%is_cosmological_constant .and. EV%w_ix > 0) then
+        select type(DE => State%CP%DarkEnergy)
+        type is (TCoupledQuintessence)
+            if (DE%beta /= 0._dl) then
+                block
+                    real(dl) :: phi_bg, phidot_bg, dphi, dphidot, vc
+                    call DE%ValsAta(a, phi_bg, phidot_bg)  !phidot_bg = dphi/dtau (conformal)
+                    dphi    = ay(EV%w_ix)       !delta_phi
+                    dphidot = ay(EV%w_ix+1)     !delta_phi'
+                    vc      = ay(EV%w_ix+2)     !v_c = theta_c/k
+                    ! CDM density: add the velocity divergence and the running-mass term
+                    ayprime(ix_clxc) = ayprime(ix_clxc) - k*vc - DE%beta*dphidot
+                    ! CDM velocity (fifth force + reduced Hubble drag from the running mass).
+                    ! Sign of the force is -beta*k^2*delta_phi (v_c form: -beta*k*delta_phi): derived
+                    ! from grad_mu T_c^{mu i} = beta*rho_c*grad^i(phi) with the SAME field-source
+                    ! sign as the background KG (+beta*rho_c); together they give an ATTRACTIVE fifth
+                    ! force (+beta^2 in delta_c''), i.e. G_eff=G(1+2 beta^2).
+                    ayprime(EV%w_ix+2) = -(adotoa - DE%beta*phidot_bg)*vc - DE%beta*k*dphi
+                    ! Field perturbation gains the CDM density source (+beta*grhoc_t*delta_c)
+                    ayprime(EV%w_ix+1) = ayprime(EV%w_ix+1) + DE%beta*grhoc_t*clxc
                 end block
             end if
         end select

@@ -28,6 +28,10 @@
 
     real(dl), parameter :: Tpl= sqrt(kappa*hbar/c**5)  ! sqrt(8 pi G hbar/c^5), reduced planck time
 
+    ! Uniform ln(a) grid (a=1e-6..1) for the coupled-quintessence CDM-mass correction table
+    integer,  parameter :: ndmcorr = 4096
+    real(dl), parameter :: dmcorr_lna_min = -13.815510557964274_dl  ! ln(1e-6)
+
     ! General base class. Specific implemenetations should inherit, defining Vofphi and setting up
     ! initial conditions and interpolation tables
     type, extends(TDarkEnergyModel) :: TQuintessence
@@ -103,11 +107,42 @@
     procedure, nopass :: PythonClass => TTrackerQuintessence_PythonClass
     procedure, nopass :: SelfPointer => TTrackerQuintessence_SelfPointer
     procedure, private :: Tracker_integrate
+    procedure, private :: Tracker_solve
     end type TTrackerQuintessence
+
+    ! Conformal (Amendola-type) coupled quintessence: the CDM mass runs with the field,
+    !   m(phi) = m0 exp(-beta*phi)   (phi in reduced Planck units, kappa=1),
+    ! so the CDM density dilutes as rho_c = rho_c0 a^-3 exp(-beta*(phi - phi(a=1))) and the
+    ! Klein-Gordon equation gains a source +beta*rho_c. This is the exact sign convention of
+    ! the N-body solver scalar_de_commons.f90 (coupled_de, beta_cde): rhom = cm*exp(-3N-beta*u)
+    ! and dv/dN = ... - 3*(V'(u) - beta*rhom)/E2. beta=0 reduces EXACTLY to TTrackerQuintessence.
+    !
+    ! The background is a genuinely coupled (phi, rho_c) system; it is solved by a fixed-point
+    ! outer loop that reuses the tracker shooting: each pass integrates the field with the
+    ! previous pass's (frozen) mass-correction table exp(-beta*(phi-phi0)) fed into H(a) through
+    ! the polymorphic TDarkEnergyModel%CDM_BackgroundCorrection hook and into the KG source, then
+    ! rebuilds the table from the new phi(a). The excess CDM density therefore flows through the
+    ! SAME hook get_background_densities / dtauda use, so H(a) is exact (same pattern as
+    ! TInteractingDE). The perturbation coupling (CDM fifth force, field source) lives in
+    ! equations.f90's derivs, gated on this type with beta/=0.
+    type, extends(TTrackerQuintessence) :: TCoupledQuintessence
+        real(dl) :: beta = 0._dl        !conformal coupling (m_dm ~ exp(-beta*phi)); MUST be first new component (Python-mapped)
+        real(dl) :: phi0 = 0._dl        !field value at a=1 (normalization of the mass correction)
+        logical  :: dmcorr_ready = .false. !.true. once dmcorr_a holds a usable table
+        real(dl), allocatable :: dmcorr_a(:) !exp(-beta*(phi(a)-phi0)) on the uniform ln a grid
+    contains
+    procedure :: Init => TCoupledQuintessence_Init
+    procedure :: ReadParams => TCoupledQuintessence_ReadParams
+    procedure, nopass :: PythonClass => TCoupledQuintessence_PythonClass
+    procedure, nopass :: SelfPointer => TCoupledQuintessence_SelfPointer
+    procedure :: CDM_BackgroundCorrection => TCoupledQuintessence_CDM_BackgroundCorrection
+    procedure, private :: build_dmcorr => TCoupledQuintessence_build_dmcorr
+    procedure, private :: dmcorr_of_a => TCoupledQuintessence_dmcorr_of_a
+    end type TCoupledQuintessence
 
     procedure(TClassDverk) :: dverk
 
-    public TQuintessence, TEarlyQuintessence, TTrackerQuintessence
+    public TQuintessence, TEarlyQuintessence, TTrackerQuintessence, TCoupledQuintessence
     contains
 
     function VofPhi(this, phi, deriv)
@@ -205,18 +240,32 @@
     integer num
     real(dl) y(num),yprime(num)
     real(dl) a, a2, tot
-    real(dl) phi, grhode, phidot, adot
+    real(dl) phi, grhode, phidot, adot, grhoc_coupled_a4
 
     a2=a**2
     phi = y(1)
     phidot = y(2)/a2
 
     grhode=a2*(0.5d0*phidot**2 + a2*this%Vofphi(phi,0))
+    ! grho_no_de already carries the coupled CDM excess through CDM_BackgroundCorrection,
+    ! so the total (and hence H) sees the running CDM mass self-consistently.
     tot = this%state%grho_no_de(a) + grhode
 
     adot=sqrt(tot/3.0d0)
     yprime(1)=phidot/adot !d phi /d a
     yprime(2)= -a2**2*this%Vofphi(phi,1)/adot
+
+    ! Coupled quintessence: add the Klein-Gordon source +beta*rho_c to (a^2 phi')'.
+    ! In these variables (a^2 phi')' = -a^4 V,phi + a^2*beta*grhoc_t, and a^2*grhoc_t equals
+    ! the coupled CDM density in 8piG*rho*a^4 units = grhoc*a + CDM_BackgroundCorrection*a^2.
+    select type(this)
+    type is (TCoupledQuintessence)
+        if (this%beta /= 0._dl) then
+            grhoc_coupled_a4 = this%state%grhoc*a + &
+                this%CDM_BackgroundCorrection(this%state%grhoc, this%state%grhov, a)*a2
+            yprime(2) = yprime(2) + this%beta*grhoc_coupled_a4/adot
+        end if
+    end select
 
     end subroutine EvolveBackground
 
@@ -912,12 +961,23 @@
     subroutine TTrackerQuintessence_Init(this, State)
     class(TTrackerQuintessence), intent(inout) :: this
     class(TCAMBdata), intent(in), target :: State
-    real(dl) lnA_lo, lnA_hi, lnA_mid, f_lo, f_hi, fmid, om
-    integer it, npoints_log_count
 
     this%astart = 1.d-6                 !start field integration at a=1e-6 (as N-body solver)
     this%integrate_tol = 1.d-10         !tight enough for |Omega_phi/Omega_de-1| << 1e-8
     call this%TQuintessence%Init(State)
+    call this%Tracker_solve()           !via this% so an extending type's dynamic type survives to EvolveBackground
+
+    end subroutine TTrackerQuintessence_Init
+
+
+    subroutine Tracker_solve(this)
+    !Grid setup + ln A shooting + final table fill. Kept separate from Init so that
+    !TCoupledQuintessence can re-run it with the coupling active WITHOUT slicing its dynamic
+    !type (a this%TTrackerQuintessence%Init call would slice to the parent and disable the
+    !coupled EvolveBackground/CDM_BackgroundCorrection paths). Called as this%Tracker_solve().
+    class(TTrackerQuintessence), intent(inout) :: this
+    real(dl) lnA_lo, lnA_hi, lnA_mid, f_lo, f_hi, fmid, om
+    integer it, npoints_log_count
 
     ! Two-phase grid: log spacing in a up to max_a_log, then linear (as TEarlyQuintessence).
     this%log_astart = log(this%astart)
@@ -967,7 +1027,7 @@
         write(*,*) 'TTrackerQuintessence Omega_phi(1)/Omega_de - 1 =', om/this%State%Omega_de - 1._dl
     end if
 
-    end subroutine TTrackerQuintessence_Init
+    end subroutine Tracker_solve
 
 
     subroutine TTrackerQuintessence_ReadParams(this, Ini)
@@ -1001,6 +1061,144 @@
     P => PType
 
     end subroutine TTrackerQuintessence_SelfPointer
+
+    ! ---- Conformal coupled quintessence (Amendola-type, m_dm ~ exp(-beta*phi)) ----
+
+    subroutine TCoupledQuintessence_Init(this, State)
+    class(TCoupledQuintessence), intent(inout) :: this
+    class(TCAMBdata), intent(in), target :: State
+    real(dl) phi0_prev, aphi, aphidot
+    integer iter
+    integer, parameter :: max_outer = 25
+
+    this%dmcorr_ready = .false.   !first background pass sees uncoupled CDM (hook returns 0)
+    this%astart = 1.d-6
+    this%integrate_tol = 1.d-10
+    call this%TQuintessence%Init(State)   !grand-parent Init only sets State/num_perturb/log_astart
+
+    if (this%beta == 0._dl) then
+        !exact uncoupled tracker path (bit-identical to TTrackerQuintessence)
+        call this%Tracker_solve()
+        return
+    end if
+
+    ! Fixed-point loop for the coupled (phi, rho_c) background: each pass re-shoots ln A and
+    ! refills phi_a with the previous pass's frozen mass-correction table (fed to H via the
+    ! CDM_BackgroundCorrection hook and to the KG source in EvolveBackground), then rebuilds
+    ! the table. this%Tracker_solve() keeps the dynamic type TCoupledQuintessence so the coupled
+    ! EvolveBackground source is active. Converges on phi(a=1); a few passes suffice.
+    phi0_prev = 1.d30
+    do iter = 1, max_outer
+        call this%Tracker_solve()
+        if (global_error_flag /= 0) return
+        call this%ValsAta(1._dl, aphi, aphidot)
+        this%phi0 = aphi
+        call this%build_dmcorr()
+        if (abs(this%phi0 - phi0_prev) < 1.d-10) exit
+        phi0_prev = this%phi0
+    end do
+
+    !delta_phi, delta_phi', plus the coupled-CDM velocity theta_c in the 3rd slot
+    this%num_perturb_equations = 3
+
+    if (this%DebugLevel > 0) then
+        write(*,*) 'TCoupledQuintessence beta, lnA, phi0 =', this%beta, this%lnA, this%phi0
+        write(*,*) 'TCoupledQuintessence outer iters, Omega_phi(1)/Omega_de-1 =', &
+            iter, this%omega_solved/this%State%Omega_de - 1._dl
+    end if
+
+    end subroutine TCoupledQuintessence_Init
+
+
+    subroutine TCoupledQuintessence_build_dmcorr(this)
+    !Tabulate dmcorr(a) = exp(-beta*(phi(a) - phi(a=1))) on the uniform ln a grid from phi_a.
+    class(TCoupledQuintessence), intent(inout) :: this
+    integer i
+    real(dl) lna, a, dlna, aphi, aphidot
+
+    if (.not. allocated(this%dmcorr_a)) allocate(this%dmcorr_a(ndmcorr))
+    dlna = (0._dl - dmcorr_lna_min)/real(ndmcorr-1, dl)
+    do i = 1, ndmcorr
+        lna = dmcorr_lna_min + real(i-1, dl)*dlna
+        a = exp(lna)
+        call this%ValsAta(a, aphi, aphidot)
+        this%dmcorr_a(i) = exp(-this%beta*(aphi - this%phi0))
+    end do
+    this%dmcorr_ready = .true.
+
+    end subroutine TCoupledQuintessence_build_dmcorr
+
+
+    function TCoupledQuintessence_dmcorr_of_a(this, a) result(val)
+    !Linear interpolation of the dmcorr table in ln a (clamped at both ends; dmcorr(a>=1)=1).
+    class(TCoupledQuintessence) :: this
+    real(dl), intent(in) :: a
+    real(dl) val, lna, t, dlna
+    integer i
+
+    dlna = (0._dl - dmcorr_lna_min)/real(ndmcorr-1, dl)
+    lna = log(max(a, 1.d-30))
+    t = (lna - dmcorr_lna_min)/dlna + 1._dl
+    if (t <= 1._dl) then
+        val = this%dmcorr_a(1)
+    else if (t >= real(ndmcorr, dl)) then
+        val = this%dmcorr_a(ndmcorr)
+    else
+        i = int(t)
+        val = this%dmcorr_a(i) + (t - real(i, dl))*(this%dmcorr_a(i+1) - this%dmcorr_a(i))
+    end if
+
+    end function TCoupledQuintessence_dmcorr_of_a
+
+
+    function TCoupledQuintessence_CDM_BackgroundCorrection(this, grhoc, grhov, a) result(dgrhoc_t)
+    !CDM background excess from the running mass. rho_c(a) = rho_c0 a^-3 exp(-beta*(phi-phi0)),
+    !so grhoc_t = 8piG*rho_c*a^2 = (grhoc/a)*dmcorr and the excess over the naive a^-3 CDM is
+    !  dgrhoc_t = 8piG*a^2*[rho_c(a) - rho_c0 a^-3] = (grhoc/a)*(dmcorr(a) - 1).
+    !dmcorr(a=1)=1 keeps the present CDM density fixed (LCDM budget / omch2 meaning), matching
+    !get_background_densities and dtauda so H(a) is exact. Same hook TInteractingDE overrides.
+    class(TCoupledQuintessence) :: this
+    real(dl), intent(in) :: grhoc, grhov, a
+    real(dl) dgrhoc_t, dmcorr
+
+    dgrhoc_t = 0._dl
+    if (this%beta == 0._dl) return
+    if (.not. this%dmcorr_ready) return
+    if (a <= 0._dl) return
+    dmcorr = this%dmcorr_of_a(a)
+    dgrhoc_t = (grhoc/a)*(dmcorr - 1._dl)
+
+    end function TCoupledQuintessence_CDM_BackgroundCorrection
+
+
+    subroutine TCoupledQuintessence_ReadParams(this, Ini)
+    use IniObjects
+    class(TCoupledQuintessence) :: this
+    class(TIniFile), intent(in) :: Ini
+
+    call this%TTrackerQuintessence%ReadParams(Ini)
+    this%beta = Ini%Read_Double('quint_beta', this%beta)
+
+    end subroutine TCoupledQuintessence_ReadParams
+
+
+    function TCoupledQuintessence_PythonClass()
+    character(LEN=:), allocatable :: TCoupledQuintessence_PythonClass
+
+    TCoupledQuintessence_PythonClass = 'CoupledQuintessence'
+
+    end function TCoupledQuintessence_PythonClass
+
+    subroutine TCoupledQuintessence_SelfPointer(cptr,P)
+    use iso_c_binding
+    Type(c_ptr) :: cptr
+    Type (TCoupledQuintessence), pointer :: PType
+    class (TPythonInterfacedClass), pointer :: P
+
+    call c_f_pointer(cptr, PType)
+    P => PType
+
+    end subroutine TCoupledQuintessence_SelfPointer
 
 
     !real(dl) function GetOmegaFromInitial(this, astart,phi,phidot,atol)

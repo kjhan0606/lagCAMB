@@ -333,6 +333,53 @@ class InteractingDE(DarkEnergyEqnOfState):
 
 
 @fortran_class
+class RunningVacuum(DarkEnergyModel):
+    r"""
+    Running Vacuum Model (RVM, Sola group) with :math:`\Lambda(H^2) = c_0 + \nu H^2`,
+    i.e. :math:`\rho_\Lambda(H) = (3/8\pi G)(c_0 + \nu H^2)`. The vacuum exchanges
+    energy with cold dark matter only (baryons and radiation stay uncoupled), giving
+    the exact background
+
+    .. math::
+        \rho_c(a) &= \rho_{c0}\,a^{-3(1-\nu)}, \\
+        \rho_\Lambda(a) &= \rho_{\Lambda 0} + \frac{\nu}{1-\nu}\,\rho_{c0}\,
+                           \left(a^{-3(1-\nu)} - 1\right).
+
+    The vacuum has :math:`w=-1` identically and is smooth
+    (:math:`\delta\rho_\Lambda=0` in the CDM frame; the standard
+    Gomez-Valent/Sola/Basilakos linear treatment). The energy transfer feeds
+    unclustered particles into the CDM, adding a dilution term
+    :math:`-3\nu\mathcal{H}\,\delta_c` to the perturbed CDM continuity. For
+    :math:`\nu=0` the model is bit-identical to :math:`\Lambda`CDM.
+
+    Usage::
+
+        pars.DarkEnergy = RunningVacuum()
+        pars.DarkEnergy.set_params(nu=0.001)
+
+    References: Sola 2013 (arXiv:1306.1527), Gomez-Valent & Sola 2015
+    (arXiv:1409.7048).
+    """
+
+    _fields_ = (
+        ("nu", c_double, "running coefficient nu in Lambda(H^2)=c0+nu*H^2 (0 = LCDM)"),
+        ("__grhoc_rvm", c_double, "cached 8 pi G rho_c0 (internal)"),
+    )
+
+    _fortran_class_module_ = "DarkEnergyRunningVacuum"
+    _fortran_class_name_ = "TRunningVacuum"
+
+    def set_params(self, nu=0.0):
+        """
+        Set the running-vacuum parameter.
+
+        :param nu: dimensionless running coefficient of Lambda(H^2)=c0+nu*H^2
+                   (typical |nu| <= few x 1e-3; nu=0 gives LCDM).
+        """
+        self.nu = nu
+
+
+@fortran_class
 class KEssence(DarkEnergyEqnOfState):
     r"""
     Purely kinetic k-essence dark energy with Lagrangian
@@ -568,6 +615,7 @@ F2003Class._class_names.update({
     "kessence": KEssence,
     "chaplygin": Chaplygin,
     "interacting_de": InteractingDE,
+    "running_vacuum": RunningVacuum,
     "fuzzy_dm_field": FuzzyDMField,
     "horndeski": HorndeskiDE,
 })

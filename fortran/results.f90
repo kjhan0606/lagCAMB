@@ -995,7 +995,8 @@
         end if
 
         densities(2,i) = this%grhok * a**2
-        densities(3,i) = this%grhoc * a
+        densities(3,i) = this%grhoc * a &
+            + this%CP%DarkEnergy%CDM_BackgroundCorrection(this%grhoc, this%grhov, a) * a**2
         densities(4,i) = this%grhob * a
         densities(5,i) = this%grhog
         densities(6,i) = this%grhornomass
@@ -1270,6 +1271,11 @@
         grhoa2 = grhoa2 + grhoc_t * a**2  ! grhoc_t = 8piG*rho*a^2
     else
         grhoa2 = grhoa2 + this%grhoc * a
+    end if
+    ! Interacting DE (type 1): CDM background gains the dark-sector energy exchange.
+    ! CDM_BackgroundCorrection returns 8piG*a^2*[rho_c-rho_c0 a^-3]; *a^2 -> 8piG*rho*a^4.
+    if (allocated(this%CP%DarkEnergy)) then
+        grhoa2 = grhoa2 + this%CP%DarkEnergy%CDM_BackgroundCorrection(this%grhoc, this%grhov, a) * a**2
     end if
 
     if (this%CP%Num_Nu_massive /= 0) then

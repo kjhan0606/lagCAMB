@@ -79,9 +79,35 @@
 
     end type TEarlyQuintessence
 
+    ! Tracker/thawing quintessence with a single scalar field and no cosmological constant.
+    ! Two potentials selected by pot_type:
+    !   1 = Ratra-Peebles   V(phi) = A * phi^(-alpha)
+    !   2 = exponential     V(phi) = A * exp(-lam*phi)
+    ! phi is in reduced Planck units. The amplitude A is fixed by shooting (bisection on
+    ! ln A) so that Omega_phi(a=1) equals the dark-energy budget grhov that CAMB expects.
+    ! Same conventions as the N-body solver scalar_de_commons.f90 (quint_pot 1=RP, 2=exp),
+    ! but with CAMB's full background (radiation + neutrinos) retained.
+    type, extends(TQuintessence) :: TTrackerQuintessence
+        integer  :: pot_type = 1        !1=Ratra-Peebles, 2=exponential
+        real(dl) :: alpha = 1._dl       !Ratra-Peebles exponent (V ~ phi^-alpha)
+        real(dl) :: lam = 1._dl         !exponential slope (V ~ exp(-lam*phi))
+        real(dl) :: phi_ini = 0.01_dl   !initial field value at a=astart
+        real(dl) :: lnA = 0._dl         !log amplitude (in grhocrit units), set by shooting
+        real(dl) :: omega_solved = -1._dl !Omega_phi(a=1) achieved by the shooting (diagnostic)
+        integer  :: npoints = 5000      !baseline number of log a steps
+        real(dl), dimension(:), allocatable :: fde, ddfde
+    contains
+    procedure :: Vofphi => TTrackerQuintessence_VofPhi
+    procedure :: Init => TTrackerQuintessence_Init
+    procedure :: ReadParams => TTrackerQuintessence_ReadParams
+    procedure, nopass :: PythonClass => TTrackerQuintessence_PythonClass
+    procedure, nopass :: SelfPointer => TTrackerQuintessence_SelfPointer
+    procedure, private :: Tracker_integrate
+    end type TTrackerQuintessence
+
     procedure(TClassDverk) :: dverk
 
-    public TQuintessence, TEarlyQuintessence
+    public TQuintessence, TEarlyQuintessence, TTrackerQuintessence
     contains
 
     function VofPhi(this, phi, deriv)
@@ -746,6 +772,235 @@
     P => PType
 
     end subroutine TEarlyQuintessence_SelfPointer
+
+    ! Tracker quintessence (Ratra-Peebles / exponential), shooting on ln A
+
+    function TTrackerQuintessence_VofPhi(this, phi, deriv) result(V)
+    !The input variable phi is sqrt(8*Pi*G)*psi (reduced Planck units)
+    !Returns (8*Pi*G)^(1-deriv/2)*d^{deriv}V/d^{deriv}psi in 1/Mpc^2 units.
+    !V/rho_crit0 = exp(lnA - alpha*log(phi))  (RP)  or  exp(lnA - lam*phi)  (exp);
+    !multiplying by grhocrit ( = 8*pi*G*rho_crit0 ) puts V in 1/Mpc^2, matching grhov.
+    class(TTrackerQuintessence) :: this
+    real(dl) phi, V
+    integer deriv
+    real(dl) lnv, V0, phi_s
+
+    phi_s = max(phi, 1.d-30)
+    if (this%pot_type == 2) then
+        lnv = this%lnA - this%lam*phi
+    else
+        lnv = this%lnA - this%alpha*log(phi_s)
+    end if
+    V0 = this%State%grhocrit*exp(min(lnv, 200._dl))   !V (deriv 0) in 1/Mpc^2
+
+    if (deriv==0) then
+        V = V0
+    else if (deriv==1) then
+        if (this%pot_type == 2) then
+            V = -this%lam*V0
+        else
+            V = -this%alpha/phi_s*V0
+        end if
+    else if (deriv==2) then
+        if (this%pot_type == 2) then
+            V = this%lam**2*V0
+        else
+            V = this%alpha*(this%alpha+1._dl)/phi_s**2*V0
+        end if
+    else
+        call MpiStop('Invalid deriv in TTrackerQuintessence_VofPhi')
+        V = 0
+    end if
+
+    end function TTrackerQuintessence_VofPhi
+
+
+    subroutine Tracker_integrate(this, fill, om)
+    !Integrate the background (phi, a^2 phi') from astart to a=1 on the two-phase
+    !(log then linear in a) grid, using the base-class EvolveBackground machinery and
+    !the current this%lnA. Returns om = Omega_phi(a=1). If fill, stores the interpolation
+    !tables (phi_a, phidot_a, fde) exactly as TEarlyQuintessence%Init does.
+    class(TTrackerQuintessence), intent(inout) :: this
+    logical, intent(in) :: fill
+    real(dl), intent(out) :: om
+    integer, parameter :: NumEqs=2
+    real(dl) c(24), w(NumEqs,9), y(NumEqs)
+    real(dl), parameter :: splZero = 0._dl
+    real(dl) afrom, aend, a2, a_cur, phi_end, phidot_end
+    integer ind, i, ix, tot_points
+
+    y(1) = this%phi_ini
+    y(2) = 0._dl                       !dphi/dN = 0  =>  a^2 phi' = 0
+    tot_points = this%npoints_log + this%npoints_linear
+
+    if (fill) then
+        if (allocated(this%phi_a)) then
+            deallocate(this%phi_a, this%phidot_a)
+            deallocate(this%ddphi_a, this%ddphidot_a, this%sampled_a)
+        end if
+        if (allocated(this%fde)) deallocate(this%fde, this%ddfde)
+        allocate(this%phi_a(tot_points), this%phidot_a(tot_points))
+        allocate(this%ddphi_a(tot_points), this%ddphidot_a(tot_points))
+        allocate(this%sampled_a(tot_points), this%fde(tot_points), this%ddfde(tot_points))
+        this%sampled_a(1) = this%astart
+        this%phi_a(1) = y(1)
+        this%phidot_a(1) = 0._dl
+        this%fde(1) = fde_of(this, this%astart, y(1), 0._dl)
+    end if
+
+    ! log-spaced phase up to max_a_log
+    ind = 1
+    afrom = this%log_astart
+    do i = 1, this%npoints_log-1
+        aend = this%log_astart + this%dloga*i
+        ix = i+1
+        a_cur = exp(aend)
+        a2 = a_cur**2
+        call dverk(this,NumEqs,EvolveBackgroundLog,afrom,y,aend,this%integrate_tol,ind,c,NumEqs,w)
+        if (global_error_flag/=0) then; om = 0; return; end if
+        call EvolveBackgroundLog(this,NumEqs,aend,y,w(:,1))
+        if (fill) then
+            this%sampled_a(ix) = a_cur
+            this%phi_a(ix) = y(1)
+            this%phidot_a(ix) = y(2)/a2
+            this%fde(ix) = fde_of(this, a_cur, y(1), y(2)/a2)
+        end if
+    end do
+
+    ! linear-spaced phase from max_a_log to a=1
+    ind = 1
+    afrom = this%max_a_log
+    do i = 1, this%npoints_linear
+        ix = this%npoints_log + i
+        aend = this%max_a_log + this%da*i
+        a2 = aend**2
+        call dverk(this,NumEqs,EvolveBackground,afrom,y,aend,this%integrate_tol,ind,c,NumEqs,w)
+        if (global_error_flag/=0) then; om = 0; return; end if
+        call EvolveBackground(this,NumEqs,aend,y,w(:,1))
+        if (fill) then
+            this%sampled_a(ix) = aend
+            this%phi_a(ix) = y(1)
+            this%phidot_a(ix) = y(2)/a2
+            this%fde(ix) = fde_of(this, aend, y(1), y(2)/a2)
+        end if
+    end do
+
+    phi_end = y(1)
+    phidot_end = y(2)                  !a=1 so phidot = y(2)/a^2 = y(2)
+    ! Omega_phi(a=1) = grhov_t(a=1)/grhocrit  (grhov_t = 0.5*phidot^2 + a^2 V, a=1)
+    om = (0.5_dl*phidot_end**2 + this%Vofphi(phi_end,0))/this%State%grhocrit
+
+    if (fill) then
+        call spline(this%sampled_a,this%phi_a,tot_points,splZero,splZero,this%ddphi_a)
+        call spline(this%sampled_a,this%phidot_a,tot_points,splZero,splZero,this%ddphidot_a)
+        call spline(this%sampled_a,this%fde,tot_points,splZero,splZero,this%ddfde)
+    end if
+
+    contains
+    real(dl) function fde_of(this, a, phi, phidot)
+    class(TTrackerQuintessence) :: this
+    real(dl), intent(in) :: a, phi, phidot
+    real(dl) aa2, grhode
+    aa2 = a**2
+    grhode = aa2*(0.5_dl*phidot**2 + aa2*this%Vofphi(phi,0))
+    fde_of = grhode/(this%State%grho_no_de(a) + grhode)
+    end function fde_of
+
+    end subroutine Tracker_integrate
+
+
+    subroutine TTrackerQuintessence_Init(this, State)
+    class(TTrackerQuintessence), intent(inout) :: this
+    class(TCAMBdata), intent(in), target :: State
+    real(dl) lnA_lo, lnA_hi, lnA_mid, f_lo, f_hi, fmid, om
+    integer it, npoints_log_count
+
+    this%astart = 1.d-6                 !start field integration at a=1e-6 (as N-body solver)
+    this%integrate_tol = 1.d-10         !tight enough for |Omega_phi/Omega_de-1| << 1e-8
+    call this%TQuintessence%Init(State)
+
+    ! Two-phase grid: log spacing in a up to max_a_log, then linear (as TEarlyQuintessence).
+    this%log_astart = log(this%astart)
+    this%dloga = (-this%log_astart)/(this%npoints-1)
+    this%max_a_log = 1.d0/this%npoints/(exp(this%dloga)-1)
+    npoints_log_count = (log(this%max_a_log)-this%log_astart)/this%dloga + 1
+    this%npoints_log = npoints_log_count
+    this%max_a_log = exp(this%log_astart + this%dloga*(npoints_log_count-1))
+    this%da = min(this%max_a_log*(exp(this%dloga)-1), &
+        (1._dl - this%max_a_log)/(this%npoints - this%npoints_log))
+    this%npoints_linear = int((1._dl - this%max_a_log)/this%da) + 1
+    this%da = (1._dl - this%max_a_log)/this%npoints_linear
+
+    ! Shoot on ln A (bisection) so Omega_phi(a=1) = grhov/grhocrit budget.
+    lnA_lo = -60._dl
+    lnA_hi =  60._dl
+    this%lnA = lnA_lo
+    call this%Tracker_integrate(.false., om)
+    f_lo = om/this%State%Omega_de - 1._dl
+    this%lnA = lnA_hi
+    call this%Tracker_integrate(.false., om)
+    f_hi = om/this%State%Omega_de - 1._dl
+    if (f_lo*f_hi > 0._dl) then
+        global_error_flag = error_darkenergy
+        global_error_message = 'TTrackerQuintessence: shooting not bracketed'
+        return
+    end if
+    do it = 1, 200
+        lnA_mid = 0.5_dl*(lnA_lo + lnA_hi)
+        this%lnA = lnA_mid
+        call this%Tracker_integrate(.false., om)
+        fmid = om/this%State%Omega_de - 1._dl
+        if (fmid > 0._dl) then
+            lnA_hi = lnA_mid
+        else
+            lnA_lo = lnA_mid
+        end if
+        if (abs(fmid) < 1.d-10 .or. lnA_hi - lnA_lo < 1.d-14) exit
+    end do
+    this%lnA = 0.5_dl*(lnA_lo + lnA_hi)
+
+    ! Final pass: build the interpolation tables.
+    call this%Tracker_integrate(.true., om)
+    this%omega_solved = om
+    if (this%DebugLevel > 0) then
+        write(*,*) 'TTrackerQuintessence pot_type, lnA =', this%pot_type, this%lnA
+        write(*,*) 'TTrackerQuintessence Omega_phi(1)/Omega_de - 1 =', om/this%State%Omega_de - 1._dl
+    end if
+
+    end subroutine TTrackerQuintessence_Init
+
+
+    subroutine TTrackerQuintessence_ReadParams(this, Ini)
+    use IniObjects
+    class(TTrackerQuintessence) :: this
+    class(TIniFile), intent(in) :: Ini
+
+    call this%TDarkEnergyModel%ReadParams(Ini)
+    this%pot_type = Ini%Read_Int('quint_pot_type', this%pot_type)
+    this%alpha = Ini%Read_Double('quint_alpha', this%alpha)
+    this%lam = Ini%Read_Double('quint_lam', this%lam)
+    this%phi_ini = Ini%Read_Double('quint_phi_ini', this%phi_ini)
+
+    end subroutine TTrackerQuintessence_ReadParams
+
+
+    function TTrackerQuintessence_PythonClass()
+    character(LEN=:), allocatable :: TTrackerQuintessence_PythonClass
+
+    TTrackerQuintessence_PythonClass = 'TrackerQuintessence'
+
+    end function TTrackerQuintessence_PythonClass
+
+    subroutine TTrackerQuintessence_SelfPointer(cptr,P)
+    use iso_c_binding
+    Type(c_ptr) :: cptr
+    Type (TTrackerQuintessence), pointer :: PType
+    class (TPythonInterfacedClass), pointer :: P
+
+    call c_f_pointer(cptr, PType)
+    P => PType
+
+    end subroutine TTrackerQuintessence_SelfPointer
 
 
     !real(dl) function GetOmegaFromInitial(this, astart,phi,phidot,atol)

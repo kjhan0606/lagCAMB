@@ -38,7 +38,7 @@ from .camb import (
     set_params,
     set_params_cosmomc,
 )
-from .dark_energy import DarkEnergyFluid, DarkEnergyPPF, InteractingDE
+from .dark_energy import DarkEnergyFluid, DarkEnergyPPF, InteractingDE, KEssence
 from .dark_matter import (
     DMBaryonScattering, DMDR_ETHOS, DecayingDM,
     DMNeutrinoScattering, WarmDM, FuzzyDM,

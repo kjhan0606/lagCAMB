@@ -236,6 +236,53 @@ class EarlyQuintessence(Quintessence):
 
 
 @fortran_class
+class TrackerQuintessence(Quintessence):
+    r"""
+    Tracker / thawing quintessence with a single scalar field and no cosmological constant.
+
+    Two potentials, selected by ``pot_type``:
+
+      * ``pot_type=1`` (Ratra-Peebles): :math:`V(\phi) = A\,\phi^{-\alpha}`
+      * ``pot_type=2`` (exponential):   :math:`V(\phi) = A\,e^{-\lambda\phi}`
+
+    with :math:`\phi` in reduced Planck units. The amplitude :math:`A` is fixed by shooting
+    (bisection on :math:`\ln A`) so that :math:`\Omega_\phi(a=1)` equals the dark-energy budget.
+    The field starts frozen (:math:`d\phi/dN=0`) at ``phi_ini`` at :math:`a=10^{-6}`.
+    """
+
+    _fields_ = (
+        ("pot_type", c_int, "1=Ratra-Peebles (phi^-alpha), 2=exponential (exp(-lam*phi))"),
+        ("alpha", c_double, "Ratra-Peebles exponent (V ~ phi^-alpha)"),
+        ("lam", c_double, "exponential slope (V ~ exp(-lam*phi))"),
+        ("phi_ini", c_double, "initial field value at a=astart (reduced Planck units)"),
+        ("lnA", c_double, "log amplitude in grhocrit units, set by shooting (read-only output)"),
+        ("omega_solved", c_double, "Omega_phi(a=1) achieved by the shooting (diagnostic)"),
+        ("npoints", c_int, "number of points for background integration spacing"),
+        (
+            "fde",
+            AllocatableArrayDouble,
+            "after initialized, the calculated background dark energy fractions at sampled_a",
+        ),
+        ("__ddfde", AllocatableArrayDouble),
+    )
+    _fortran_class_name_ = "TTrackerQuintessence"
+
+    def set_params(self, pot_type=1, alpha=1.0, lam=1.0, phi_ini=0.01):
+        """
+        Set tracker quintessence parameters.
+
+        :param pot_type: 1=Ratra-Peebles (V ~ phi^-alpha), 2=exponential (V ~ exp(-lam*phi))
+        :param alpha: Ratra-Peebles exponent
+        :param lam: exponential slope
+        :param phi_ini: initial (frozen) field value at a=1e-6 in reduced Planck units
+        """
+        self.pot_type = pot_type
+        self.alpha = alpha
+        self.lam = lam
+        self.phi_ini = phi_ini
+
+
+@fortran_class
 class InteractingDE(DarkEnergyEqnOfState):
     """
     Interacting Dark Energy model with DM-DE energy-momentum exchange.
@@ -283,6 +330,57 @@ class InteractingDE(DarkEnergyEqnOfState):
             byref(c_int(int(interaction_type))),
             byref(c_double(float(cs2_ide))),
         )
+
+
+@fortran_class
+class KEssence(DarkEnergyEqnOfState):
+    r"""
+    Purely kinetic k-essence dark energy with Lagrangian
+
+    .. math::
+        P(X) = M^4\,(-\tilde X + \tilde X^2), \qquad \tilde X = X/M^4,
+
+    (the overall amplitude :math:`M^4` only fixes the DE budget). The background is
+    algebraic (no shooting): the shift-symmetric equation of motion integrates to
+    :math:`(2\tilde X - 1)\sqrt{\tilde X} = C_0\,a^{-3}` with
+    :math:`C_0 = (2x_0-1)\sqrt{x_0}`, where :math:`x_0 = \tilde X(a{=}1)` is the single
+    shape parameter (must be > 1/2). This gives
+
+    .. math::
+        w(a) = \frac{\tilde X - 1}{3\tilde X - 1}, \qquad
+        c_s^2(a) = \frac{2\tilde X - 1}{6\tilde X - 1},
+
+    with the early limit :math:`w\to 1/3,\ c_s^2\to 1/3` (dark-radiation-like) and the
+    late limit :math:`w\to -1^+,\ c_s^2\to 0^+`. The time-varying rest-frame sound
+    speed makes the DE cluster below the horizon down to its (small) Jeans scale,
+    unlike a :math:`c_s^2=1` fluid.
+
+    Matches the N-body solver convention ``kes_x0`` in scalar_de_commons.f90.
+
+    Usage::
+
+        pars.DarkEnergy = KEssence()
+        pars.DarkEnergy.set_params(x0=0.6)
+    """
+
+    # Cannot declare extra _fields_ here: DarkEnergyEqnOfState ends with unmapped
+    # TCubicSpline fields in Fortran (same constraint as DarkEnergyPPF/InteractingDE).
+    # x0 is pushed to Fortran via the SetKEssenceParams method instead.
+    _fortran_class_module_ = "DarkEnergyKEssence"
+    _fortran_class_name_ = "TKEssence"
+
+    _methods_ = (("SetKEssenceParams", [POINTER(c_double)]),)
+
+    def set_params(self, x0=0.6):
+        """
+        Set purely-kinetic k-essence parameters.
+
+        :param x0: dimensionless kinetic term Xt = X/M^4 today; must be > 1/2
+                   (x0 -> 1/2+ approaches LCDM w=-1; larger x0 => w further from -1).
+        """
+        if x0 <= 0.5:
+            raise CAMBError("KEssence x0 (= Xt today) must be > 1/2 for rho>0, cs2>0")
+        self.f_SetKEssenceParams(byref(c_double(float(x0))))
 
 
 @fortran_class
@@ -409,6 +507,7 @@ class HorndeskiDE(DarkEnergyEqnOfState):
 F2003Class._class_names.update({
     "fluid": DarkEnergyFluid,
     "ppf": DarkEnergyPPF,
+    "kessence": KEssence,
     "interacting_de": InteractingDE,
     "fuzzy_dm_field": FuzzyDMField,
     "horndeski": HorndeskiDE,

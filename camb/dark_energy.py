@@ -283,6 +283,51 @@ class TrackerQuintessence(Quintessence):
 
 
 @fortran_class
+class CoupledQuintessence(TrackerQuintessence):
+    r"""
+    Conformal (Amendola-type) coupled quintessence: the CDM mass runs with the field,
+
+    .. math:: m_{\rm dm}(\phi) = m_0\, e^{-\beta\phi},
+
+    with :math:`\phi` in reduced Planck units (:math:`\kappa=1`), so the CDM density dilutes as
+    :math:`\rho_c = \rho_{c0}\,a^{-3} e^{-\beta(\phi-\phi_0)}` (:math:`\phi_0=\phi(a{=}1)`) and the
+    Klein-Gordon equation gains a source :math:`+\beta\rho_c`. The tracker potential
+    (``pot_type`` 1=Ratra-Peebles, 2=exponential) and ``ln A`` shooting are inherited from
+    :class:`TrackerQuintessence`; the coupled background is solved by a fixed-point outer loop and
+    the excess CDM density flows through the polymorphic ``CDM_BackgroundCorrection`` hook so
+    :math:`H(a)` is exact. Perturbations add the CDM fifth force (:math:`G_{\rm eff}=G(1+2\beta^2)`)
+    and the field density source in synchronous gauge.
+
+    The ``beta`` sign convention matches the N-body solver ``scalar_de_commons.f90``
+    (``use_coupled_de``, ``beta_cde``): :math:`\rho_c\propto a^{-3}e^{-\beta\phi}` with KG source
+    :math:`+\beta\rho_c`. ``beta=0`` reproduces :class:`TrackerQuintessence` exactly.
+
+    Usage::
+
+        pars.DarkEnergy = CoupledQuintessence()
+        pars.DarkEnergy.set_params(pot_type=1, alpha=1.0, beta=0.05)
+
+    References: Amendola PRD 62 043511 (2000); Amendola astro-ph/0311175.
+    """
+
+    _fields_ = (("beta", c_double, "conformal coupling; m_dm ~ exp(-beta*phi) (lagRamses beta_cde sign)"),)
+    _fortran_class_name_ = "TCoupledQuintessence"
+
+    def set_params(self, pot_type=1, alpha=1.0, lam=1.0, phi_ini=0.01, beta=0.0):
+        """
+        Set coupled tracker quintessence parameters.
+
+        :param pot_type: 1=Ratra-Peebles (V ~ phi^-alpha), 2=exponential (V ~ exp(-lam*phi))
+        :param alpha: Ratra-Peebles exponent
+        :param lam: exponential slope
+        :param phi_ini: initial (frozen) field value at a=1e-6 in reduced Planck units
+        :param beta: conformal coupling of the running CDM mass m_dm ~ exp(-beta*phi)
+        """
+        super().set_params(pot_type=pot_type, alpha=alpha, lam=lam, phi_ini=phi_ini)
+        self.beta = beta
+
+
+@fortran_class
 class InteractingDE(DarkEnergyEqnOfState):
     """
     Interacting Dark Energy model with DM-DE energy-momentum exchange.

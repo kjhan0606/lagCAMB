@@ -20,6 +20,7 @@
     ! do not have to implement w_de or grho_de if BackgroundDensityAndPressure is inherited directly
     procedure :: w_de => TDarkEnergyModel_w_de
     procedure :: grho_de => TDarkEnergyModel_grho_de
+    procedure :: CDM_BackgroundCorrection => TDarkEnergyModel_CDM_BackgroundCorrection
     procedure :: Effective_w_wa !Used as approximate values for non-linear corrections
     end type TDarkEnergyModel
 
@@ -65,6 +66,18 @@
     TDarkEnergyModel_grho_de =0._dl
 
     end function TDarkEnergyModel_grho_de
+
+    function TDarkEnergyModel_CDM_BackgroundCorrection(this, grhoc, grhov, a) result(dgrhoc_t)
+    !CDM background density excess from dark-sector energy exchange (interacting DE).
+    !Returns 8*pi*G*a^2*[rho_c(a) - rho_c0*a^{-3}] (grhoc_t convention). Zero for
+    !non-interacting models, so ordinary dark energy leaves the CDM background untouched.
+    class(TDarkEnergyModel) :: this
+    real(dl), intent(in) :: grhoc, grhov, a
+    real(dl) :: dgrhoc_t
+
+    dgrhoc_t = 0._dl
+
+    end function TDarkEnergyModel_CDM_BackgroundCorrection
 
     subroutine PrintFeedback(this, FeedbackLevel)
     class(TDarkEnergyModel) :: this

@@ -2354,6 +2354,9 @@
     if (allocated(State%CP%DarkMatter)) then
         call State%CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t)
     end if
+    ! Interacting DE (type 1): CDM background gains the dark-sector energy exchange
+    ! (zero for non-interacting DE, so LCDM/xi=0 is unchanged and bit-exact).
+    grhoc_t = grhoc_t + State%CP%DarkEnergy%CDM_BackgroundCorrection(State%grhoc, State%grhov, a)
 
     if (EV%is_cosmological_constant) then
         grhov_t = State%grhov * a2
@@ -3263,6 +3266,8 @@
     if (allocated(CP%DarkMatter)) then
         call CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t)
     end if
+    ! Interacting DE (type 1): CDM background gains the dark-sector energy exchange
+    grhoc_t = grhoc_t + CP%DarkEnergy%CDM_BackgroundCorrection(State%grhoc, State%grhov, a)
     call CP%DarkEnergy%BackgroundDensityAndPressure(State%grhov, a, grhov_t, w_dark_energy_t)
 
     grho=grhob_t+grhoc_t+grhor_t+grhog_t+grhov_t

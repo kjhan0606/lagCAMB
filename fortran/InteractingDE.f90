@@ -33,12 +33,19 @@
         real(dl) :: cs2_ide = 1._dl       ! DE rest-frame sound speed squared
         ! Cached quantities
         real(dl) :: grhoc_init = 0._dl    ! initial CDM density for modified evolution
+        ! Tabulated CDM-excess integral I(a)=Int_a^1 (rho_de/rho_de0)*a'^3 dln a'
+        ! (only built for CPL/tabulated w of type 1; constant-w uses the closed form)
+        integer :: n_ia = 0
+        logical :: use_ia_table = .false.
+        real(dl) :: lna_ia(4096) = 0._dl  ! log(a) grid (ascending, up to a=1)
+        real(dl) :: ia_tab(4096)  = 0._dl  ! I(a) on that grid
     contains
     procedure :: ReadParams => TInteractingDE_ReadParams
     procedure, nopass :: PythonClass => TInteractingDE_PythonClass
     procedure, nopass :: SelfPointer => TInteractingDE_SelfPointer
     procedure :: Init => TInteractingDE_Init
     procedure :: BackgroundDensityAndPressure => TInteractingDE_BackgroundDensityAndPressure
+    procedure :: CDM_BackgroundCorrection => TInteractingDE_CDM_BackgroundCorrection
     procedure :: PerturbedStressEnergy => TInteractingDE_PerturbedStressEnergy
     procedure :: PerturbationEvolve => TInteractingDE_PerturbationEvolve
     procedure :: PerturbationInitial => TInteractingDE_PerturbationInitial
@@ -107,6 +114,34 @@
             h2 = (S%CP%H0/100._dl)**2
             this%grhoc_init = S%grhocrit * S%CP%omch2 / h2
         end select
+
+        ! Tabulate the CDM-excess integral I(a) = Int_a^1 (rho_de/rho_de0) a'^3 dln a'
+        ! for type-1 CPL / tabulated w (constant w uses the analytic closed form instead).
+        ! Integrand g(a) = grho_de(a) * a^{-1-xi}, with grho_de = (rho_de/rho_de0) a^4.
+        this%use_ia_table = .false.
+        if (this%interaction_type == ide_Q_H_rho_de .and. &
+            (this%use_tabulated_w .or. this%wa /= 0._dl)) then
+            block
+                integer :: j
+                real(dl) :: lnamin, dlna, av, g_prev, g_cur
+                this%n_ia = size(this%lna_ia)
+                lnamin = log(1.e-8_dl)
+                dlna = (0._dl - lnamin) / real(this%n_ia - 1, dl)
+                do j = 1, this%n_ia
+                    this%lna_ia(j) = lnamin + dlna * real(j - 1, dl)
+                end do
+                this%ia_tab(this%n_ia) = 0._dl   ! I(a=1) = 0
+                av = exp(this%lna_ia(this%n_ia))
+                g_cur = this%grho_de(av) * av**(-1._dl - this%xi_ide)
+                do j = this%n_ia - 1, 1, -1
+                    g_prev = g_cur
+                    av = exp(this%lna_ia(j))
+                    g_cur = this%grho_de(av) * av**(-1._dl - this%xi_ide)
+                    this%ia_tab(j) = this%ia_tab(j+1) + 0.5_dl*(g_cur + g_prev)*dlna
+                end do
+                this%use_ia_table = .true.
+            end block
+        end if
     else
         if (this%TDarkEnergyEqnOfState%is_cosmological_constant) then
             this%num_perturb_equations = 0
@@ -152,22 +187,16 @@
 
     select case(this%interaction_type)
     case(ide_Q_H_rho_de)
-        ! rho_de(a)/rho_de(1) = a^{-3(1+w)-xi}
-        ! grhov_t = grhov * a^{4} * a^{-3(1+w)-xi} / a^2 = grhov * a^{1-3w-xi} (wrong)
-        ! Let's be careful: grhov_t = 8*pi*G*rho_de(a)*a^2
-        ! rho_de(a) = rho_de(1) * a^{-3(1+w_lam)-xi}   [for constant w]
-        ! grhov_t = grhov * a^{2-3(1+w_lam)-xi}
-        ! For w=-1: grhov_t = grhov * a^{2-xi}
-        if (.not. this%use_tabulated_w) then
-            grhov_t = grhov * a**(1._dl - 3._dl*this%w_lam - 3._dl*this%wa - this%xi_ide)
-            if (this%wa /= 0._dl) then
-                grhov_t = grhov_t * exp(-3._dl*this%wa*(1._dl - a))
-            end if
-        else
-            ! For tabulated w, modify the standard result by the xi correction
-            call this%TDarkEnergyEqnOfState%BackgroundDensityAndPressure(grhov, a, grho_de_standard)
-            grhov_t = grho_de_standard * a**(-this%xi_ide)
-        end if
+        ! BUG 1 FIX. Type 1 continuity d ln rho_de/d ln a = -[3(1+w(a)) + xi] has the
+        ! exact solution rho_de(a) = rho_de_standard(a) * a^{-xi} for ANY w(a). In
+        ! grhov_t = 8*pi*G*rho_de*a^2 units this is simply the standard (uncoupled)
+        ! grhov_t times a^{-xi}. The previous non-tabulated branch set
+        ! grhov_t = grhov*a^{1-3w-3wa-xi}, i.e. a factor a^2 too large (the standard
+        ! path divides grho_de by a^2, exponent -1-3w-3wa-xi). Delegating to the base
+        ! BackgroundDensityAndPressure guarantees the correct a^2 and also handles CPL
+        ! (wa/=0) and tabulated w with no duplicated algebra.
+        call this%TDarkEnergyEqnOfState%BackgroundDensityAndPressure(grhov, a, grho_de_standard)
+        grhov_t = grho_de_standard * a**(-this%xi_ide)
 
     case(ide_Q_H_rho_c)
         ! Q = xi*H*rho_c modifies CDM scaling, DE gets indirect modification
@@ -176,22 +205,64 @@
         call this%TDarkEnergyEqnOfState%BackgroundDensityAndPressure(grhov, a, grhov_t)
 
     case(ide_Q_H_rho_tot)
-        ! Mixed case: approximate as superposition
-        if (.not. this%use_tabulated_w) then
-            grhov_t = grhov * a**(1._dl - 3._dl*this%w_lam - 3._dl*this%wa - this%xi_ide*0.5_dl)
-            if (this%wa /= 0._dl) then
-                grhov_t = grhov_t * exp(-3._dl*this%wa*(1._dl - a))
-            end if
-        else
-            call this%TDarkEnergyEqnOfState%BackgroundDensityAndPressure(grhov, a, grho_de_standard)
-            grhov_t = grho_de_standard * a**(-this%xi_ide*0.5_dl)
-        end if
+        ! Mixed case (approximate): DE coupled with effective strength xi/2. Same a^2
+        ! fix as type 1 -- delegate to the base density and rescale by a^{-xi/2} (the old
+        ! non-tabulated branch shared the missing-a^2 error). CDM excess for this type is
+        ! not applied at the background level (see CDM_BackgroundCorrection).
+        call this%TDarkEnergyEqnOfState%BackgroundDensityAndPressure(grhov, a, grho_de_standard)
+        grhov_t = grho_de_standard * a**(-this%xi_ide*0.5_dl)
 
     case default
         call this%TDarkEnergyEqnOfState%BackgroundDensityAndPressure(grhov, a, grhov_t)
     end select
 
     end subroutine TInteractingDE_BackgroundDensityAndPressure
+
+    function TInteractingDE_CDM_BackgroundCorrection(this, grhoc, grhov, a) result(dgrhoc_t)
+    ! BUG 2 FIX. CDM background excess from the Q = xi*H*rho_de (type 1) energy exchange.
+    ! Continuity: d(rho_c a^3)/dln a = xi rho_de a^3  =>
+    !   rho_c(a) a^3 = rho_c0 - xi Int_a^1 rho_de(a') a'^3 dln a'.
+    ! In grhoc_t = 8*pi*G*rho_c*a^2 units the excess over the naive a^{-3} CDM scaling is
+    !   dgrhoc_t = 8*pi*G*a^2*[rho_c(a) - rho_c0 a^{-3}] = -xi * grhov * I(a) / a,
+    ! I(a) = Int_a^1 (rho_de/rho_de0) a'^3 dln a'  (grhov = 8*pi*G*rho_de0). I(1)=0 so the
+    ! correction vanishes today (rho_c0 fixed = present CDM), consistent with the LCDM budget.
+    ! Constant w: I(a) = (1 - a^{3-p})/(3-p), p = 3(1+w)+xi (exact closed form).
+    ! CPL / tabulated w: I(a) from the log-a table built at Init.
+    class(TInteractingDE) :: this
+    real(dl), intent(in) :: grhoc, grhov, a
+    real(dl) :: dgrhoc_t, Ia, p, lna, frac
+    integer :: jlo
+
+    dgrhoc_t = 0._dl
+    if (this%xi_ide == 0._dl) return
+    if (this%interaction_type /= ide_Q_H_rho_de) return  ! only type 1 modifies CDM background here
+    if (a <= 0._dl) return
+
+    if (this%use_ia_table) then
+        lna = log(a)
+        if (lna >= 0._dl) then
+            Ia = 0._dl
+        else if (lna <= this%lna_ia(1)) then
+            Ia = this%ia_tab(1)
+        else
+            jlo = 1 + int((lna - this%lna_ia(1)) / (this%lna_ia(2) - this%lna_ia(1)))
+            if (jlo < 1) jlo = 1
+            if (jlo > this%n_ia - 1) jlo = this%n_ia - 1
+            frac = (lna - this%lna_ia(jlo)) / (this%lna_ia(jlo+1) - this%lna_ia(jlo))
+            Ia = this%ia_tab(jlo) + frac * (this%ia_tab(jlo+1) - this%ia_tab(jlo))
+        end if
+    else
+        p = 3._dl*(1._dl + this%w_lam) + this%xi_ide
+        if (abs(3._dl - p) < 1.e-8_dl) then
+            Ia = -log(a)
+        else
+            Ia = (1._dl - a**(3._dl - p)) / (3._dl - p)
+        end if
+    end if
+
+    dgrhoc_t = -this%xi_ide * grhov * Ia / a
+
+    end function TInteractingDE_CDM_BackgroundCorrection
 
     subroutine TInteractingDE_PerturbationInitial(this, y, a, tau, k)
     class(TInteractingDE), intent(in) :: this

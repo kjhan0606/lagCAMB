@@ -384,6 +384,64 @@ class KEssence(DarkEnergyEqnOfState):
 
 
 @fortran_class
+class Chaplygin(DarkEnergyEqnOfState):
+    r"""
+    Generalized Chaplygin gas (GCG) dark energy with equation of state
+
+    .. math::
+        p = -A\,\rho^{-\alpha}, \qquad \alpha \ge 0.
+
+    Writing :math:`A_s = A/\rho_{de,0}^{1+\alpha}\in(0,1)` the background is fully
+    closed-form (no shooting):
+
+    .. math::
+        \rho_{de}(a) &= \rho_{de,0}\,[A_s + (1-A_s)\,a^{-3(1+\alpha)}]^{1/(1+\alpha)},\\
+        w(a) &= \frac{-A_s}{A_s + (1-A_s)\,a^{-3(1+\alpha)}},\\
+        c_s^2(a) &= \frac{dp}{d\rho} = -\alpha\,w(a).
+
+    The adiabatic sound speed :math:`c_s^2=-\alpha w` is used as the rest-frame
+    sound speed of the fluid perturbations. Limits: :math:`A_s\to 1` gives
+    :math:`w=-1` (pure :math:`\Lambda`) for any :math:`\alpha`; the gas is
+    dust-like (:math:`w\to 0^-`) at early times and :math:`w=-A_s` today.
+
+    As :math:`\alpha` grows the late-time sound speed :math:`\sim\alpha A_s`
+    drives the small-scale oscillations/blow-up of unified GCG
+    (`Sandvik et al. 2004 <https://arxiv.org/abs/astro-ph/0212114>`_), so
+    unified-DM/DE usage requires :math:`\alpha\ll 1`.
+
+    Matches the tabulated background convention lagRamses reuses in
+    scalar_de_commons.f90.
+
+    Usage::
+
+        pars.DarkEnergy = Chaplygin()
+        pars.DarkEnergy.set_params(As=0.75, alpha=0.01)
+    """
+
+    # Cannot declare extra _fields_ here: DarkEnergyEqnOfState ends with unmapped
+    # TCubicSpline fields in Fortran (same constraint as DarkEnergyPPF/KEssence).
+    # As, alpha are pushed to Fortran via the SetChaplyginParams method instead.
+    _fortran_class_module_ = "DarkEnergyChaplygin"
+    _fortran_class_name_ = "TChaplygin"
+
+    _methods_ = (("SetChaplyginParams", [POINTER(c_double), POINTER(c_double)]),)
+
+    def set_params(self, As=0.75, alpha=0.01):
+        """
+        Set generalized Chaplygin gas parameters.
+
+        :param As: A/rho_de0^(1+alpha), must be in (0,1) (As -> 1 approaches LCDM)
+        :param alpha: GCG exponent, must be >= 0 (alpha -> 0 approaches LCDM;
+                      larger alpha raises the late-time sound speed cs2 = -alpha*w)
+        """
+        if not (0.0 < As < 1.0):
+            raise CAMBError("Chaplygin As (= A/rho_de0^(1+alpha)) must be in (0,1)")
+        if alpha < 0.0:
+            raise CAMBError("Chaplygin alpha must be >= 0")
+        self.f_SetChaplyginParams(byref(c_double(float(As))), byref(c_double(float(alpha))))
+
+
+@fortran_class
 class FuzzyDMField(DarkEnergyModel):
     """
     Fuzzy/Ultralight Axion Dark Matter via Klein-Gordon background + EFA perturbations.
@@ -508,6 +566,7 @@ F2003Class._class_names.update({
     "fluid": DarkEnergyFluid,
     "ppf": DarkEnergyPPF,
     "kessence": KEssence,
+    "chaplygin": Chaplygin,
     "interacting_de": InteractingDE,
     "fuzzy_dm_field": FuzzyDMField,
     "horndeski": HorndeskiDE,

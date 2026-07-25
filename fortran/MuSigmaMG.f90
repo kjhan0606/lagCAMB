@@ -54,6 +54,30 @@
         real(dl) :: lambda_sigma = 0._dl ! Sigma scale [Mpc] (0 = scale-independent)
         real(dl) :: c1 = 1._dl           ! mu k-dependence coefficient
         real(dl) :: c2 = 1._dl           ! Sigma k-dependence coefficient
+        ! ---- Theory-specific QSA models (MGCAMB-style) ----
+        ! All assume the LCDM background (standard for viable parameter space):
+        !   1 = f(R) Hu-Sawicki:  mu = (1+4Q/3)/(1+Q), Q = k^2/(a^2 M^2(a)),
+        !       M^2 = 1/(3 f_RR) = R^{n+2}/(3(n+1)|fR0| R0^{n+1}); Sigma = 1.
+        !   2 = nDGP normal branch: mu = 1 + 1/(3 beta(a)),
+        !       beta = 1 + 2 H rc (1 + Hdot/(3H^2)); Sigma = 1 (scale-independent).
+        !   3 = Symmetron: mu = 1 for a<=a_ssb, else
+        !       mu = 1 + 2 beta*(a)^2 k^2/(k^2 + a^2 m(a)^2),
+        !       beta*(a) = beta_sym sqrt(1-(a_ssb/a)^3), m(a) = sqrt(1-(a_ssb/a)^3)/L_sym;
+        !       Sigma = 1.
+        ! Sigma=1 with the induced slip eta = 2/mu - 1 reproduces each theory's QSA
+        ! slip exactly (f(R): (1+2Q/3)/(1+4Q/3); nDGP: (3beta-1)/(3beta+1)).
+        integer :: model = 0             ! 0=phenomenological mu-Sigma above
+        real(dl) :: fR0 = 0._dl          ! f(R): |f_R0| today (e.g. 1e-5 for F5)
+        real(dl) :: fR_n = 1._dl         ! f(R): Hu-Sawicki index n
+        real(dl) :: Omega_rc = 0._dl     ! nDGP: Omega_rc = 1/(4 rc^2 H0^2)
+        real(dl) :: beta_sym = 0._dl     ! Symmetron: coupling beta_*
+        real(dl) :: a_ssb = 0.5_dl       ! Symmetron: symmetry-breaking scale factor
+        real(dl) :: L_sym = 1._dl        ! Symmetron: Compton range today [Mpc]
+        ! Derived LCDM background constants, filled by Init (from results.f90)
+        real(dl) :: bg_H0 = 0._dl        ! H0 [Mpc^-1]
+        real(dl) :: bg_omm = 0._dl       ! Omega_m (baryons + CDM + massive nu)
+        real(dl) :: bg_omv = 0._dl       ! Omega_Lambda (dark energy)
+        real(dl) :: bg_omr = 0._dl       ! Omega_r (photons + massless nu)
     contains
     procedure :: Init => TMuSigmaMG_Init
     procedure :: mu_of_a_k => TMuSigmaMG_mu
@@ -85,12 +109,27 @@
 
     contains
 
-    subroutine TMuSigmaMG_Init(this)
+    subroutine TMuSigmaMG_Init(this, H0_Mpc, omm, omv, omr)
     class(TMuSigmaMG), intent(inout) :: this
+    real(dl), intent(in) :: H0_Mpc, omm, omv, omr
 
-    ! Active if the analytic amplitudes are non-zero OR a table has been supplied.
-    this%is_active = (this%mu_0 /= 0._dl .or. this%sigma_0 /= 0._dl &
-        .or. mg_mu_table_set .or. mg_sigma_table_set)
+    this%bg_H0 = H0_Mpc
+    this%bg_omm = omm
+    this%bg_omv = omv
+    this%bg_omr = omr
+
+    select case (this%model)
+    case (1)  ! f(R) Hu-Sawicki
+        this%is_active = this%fR0 /= 0._dl
+    case (2)  ! nDGP
+        this%is_active = this%Omega_rc > 0._dl
+    case (3)  ! Symmetron
+        this%is_active = this%beta_sym /= 0._dl .and. this%L_sym > 0._dl
+    case default
+        ! Active if the analytic amplitudes are non-zero OR a table has been supplied.
+        this%is_active = (this%mu_0 /= 0._dl .or. this%sigma_0 /= 0._dl &
+            .or. mg_mu_table_set .or. mg_sigma_table_set)
+    end select
 
     end subroutine TMuSigmaMG_Init
 
@@ -101,27 +140,63 @@
     real(dl), intent(in) :: a, k, Omega_DE_a
     real(dl) :: mu
     real(dl) :: koa2, scale_factor
+    real(dl) :: Q, lnQ, R_a, R0, E2, beta_dgp, s
 
-    if (.not. this%is_active) then
-        mu = 1._dl
-        return
-    end if
+    mu = 1._dl
+    if (.not. this%is_active) return
 
-    ! Tabulated mode takes precedence when a mu table is present (scale independent).
-    if (mg_mu_table_set) then
-        mu = mg_eval_table(a, mg_mu_is_const, mg_mu_const, mg_mu_spline, &
-            mg_mu_lna_min, mg_mu_lna_max, mg_mu_edge_lo, mg_mu_edge_hi)
-        return
-    end if
+    select case (this%model)
+    case (1)
+        ! f(R) Hu-Sawicki QSA on LCDM background:
+        ! mu = (1+4Q/3)/(1+Q), Q = k^2/(a^2 M^2(a)),
+        ! M^2(a) = 1/(3 f_RR) = R^{n+2}/(3(n+1)|fR0| R0^{n+1}),
+        ! R(a) = 3 H0^2 (Omega_m/a^3 + 4 Omega_L) (radiation is traceless).
+        ! Q spans many decades, so work in log space to avoid overflow.
+        if (a <= 0._dl .or. k <= 0._dl) return
+        R_a = 3*this%bg_H0**2 * (this%bg_omm/a**3 + 4*this%bg_omv)
+        R0  = 3*this%bg_H0**2 * (this%bg_omm + 4*this%bg_omv)
+        lnQ = 2*log(k/a) - log(R_a/(3*(this%fR_n+1)*abs(this%fR0))) &
+            - (this%fR_n+1)*log(R_a/R0)
+        if (lnQ > 30._dl) then
+            mu = 4._dl/3._dl
+        else if (lnQ > -30._dl) then
+            Q = exp(lnQ)
+            mu = (1 + 4*Q/3)/(1 + Q)
+        end if
+    case (2)
+        ! nDGP normal branch on LCDM background: mu = 1 + 1/(3 beta(a)),
+        ! beta = 1 + 2 H rc (1 + Hdot/(3H^2)), 2 H rc = sqrt(E2/Omega_rc).
+        ! In (1 + Hdot/3H^2): radiation era -> 1/3, matter era -> 1/2, Lambda -> 1,
+        ! so beta > 1 always and mu -> 1 at early times.
+        if (a <= 0._dl) return
+        E2 = this%bg_omm/a**3 + this%bg_omr/a**4 + this%bg_omv
+        beta_dgp = 1 + sqrt(E2/this%Omega_rc) * &
+            (1 - (1.5_dl*this%bg_omm/a**3 + 2*this%bg_omr/a**4)/(3*E2))
+        mu = 1 + 1/(3*beta_dgp)
+    case (3)
+        ! Symmetron: symmetric (fully screened) before a_ssb, then
+        ! mu = 1 + 2 beta*(a)^2 k^2/(k^2 + a^2 m(a)^2) with
+        ! beta*(a) = beta_sym sqrt(s), m(a) = sqrt(s)/L_sym, s = 1-(a_ssb/a)^3.
+        if (a <= this%a_ssb) return
+        s = 1 - (this%a_ssb/a)**3
+        mu = 1 + 2*this%beta_sym**2*s * k**2/(k**2 + a**2*s/this%L_sym**2)
+    case default
+        ! Tabulated mode takes precedence when a mu table is present (scale independent).
+        if (mg_mu_table_set) then
+            mu = mg_eval_table(a, mg_mu_is_const, mg_mu_const, mg_mu_spline, &
+                mg_mu_lna_min, mg_mu_lna_max, mg_mu_edge_lo, mg_mu_edge_hi)
+            return
+        end if
 
-    mu = 1._dl + this%mu_0 * Omega_DE_a
+        mu = 1._dl + this%mu_0 * Omega_DE_a
 
-    ! Scale dependence
-    if (this%lambda_mu > 0._dl .and. a > 0._dl) then
-        koa2 = (this%lambda_mu * k / a)**2
-        scale_factor = this%c1 * koa2 / (1._dl + koa2)
-        mu = 1._dl + this%mu_0 * Omega_DE_a * (1._dl + scale_factor)
-    end if
+        ! Scale dependence
+        if (this%lambda_mu > 0._dl .and. a > 0._dl) then
+            koa2 = (this%lambda_mu * k / a)**2
+            scale_factor = this%c1 * koa2 / (1._dl + koa2)
+            mu = 1._dl + this%mu_0 * Omega_DE_a * (1._dl + scale_factor)
+        end if
+    end select
 
     end function TMuSigmaMG_mu
 
@@ -134,6 +209,14 @@
     real(dl) :: koa2, scale_factor
 
     if (.not. this%is_active) then
+        Sig = 1._dl
+        return
+    end if
+
+    ! f(R)/nDGP/Symmetron: the Weyl potential sourced by matter is unmodified
+    ! in QSA (Sigma = 1 exactly); the slip eta = 2/mu - 1 then matches each
+    ! theory's QSA gamma. Lensing still changes indirectly via modified growth.
+    if (this%model /= 0) then
         Sig = 1._dl
         return
     end if
@@ -273,6 +356,21 @@
     integer, intent(in) :: FeedbackLevel
 
     if (FeedbackLevel > 0 .and. this%is_active) then
+        select case (this%model)
+        case (1)
+            write(*,'("Modified Gravity: f(R) Hu-Sawicki (QSA)")')
+            write(*,'("  |fR0| = ",ES10.3,"  n = ",F6.2)') abs(this%fR0), this%fR_n
+            return
+        case (2)
+            write(*,'("Modified Gravity: nDGP normal branch (QSA)")')
+            write(*,'("  Omega_rc = ",ES10.3)') this%Omega_rc
+            return
+        case (3)
+            write(*,'("Modified Gravity: Symmetron (QSA)")')
+            write(*,'("  a_ssb = ",F8.4,"  beta = ",F8.4,"  L = ",ES10.3," Mpc")') &
+                this%a_ssb, this%beta_sym, this%L_sym
+            return
+        end select
         write(*,'("Modified Gravity (mu-Sigma):")')
         if (mg_mu_table_set) then
             write(*,'("  mu(a): tabulated")')

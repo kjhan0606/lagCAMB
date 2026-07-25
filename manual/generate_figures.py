@@ -474,6 +474,58 @@ def setup_musigma():
     return _multi
 
 
+def _mg_base_pars():
+    pars = camb.CAMBparams()
+    pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+    pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+    pars.set_for_lmax(2500, lens_potential_accuracy=1)
+    pars.WantTransfer = True
+    pars.set_matter_power(redshifts=[0], kmax=10.0)
+    return pars
+
+
+def setup_fr():
+    """f(R) Hu-Sawicki gravity (QSA)"""
+    def _multi():
+        out = []
+        for fR0, lab in [(1e-5, r'$|f_{R0}|=10^{-5}$ (F5)'),
+                         (1e-4, r'$|f_{R0}|=10^{-4}$ (F4)')]:
+            pars = _mg_base_pars()
+            pars.MG.set_fR(fR0, n=1.0)
+            results = camb.get_results(pars)
+            out.append((pars, results, lab))
+        return out
+    return _multi
+
+
+def setup_ndgp():
+    """nDGP normal-branch gravity (QSA)"""
+    def _multi():
+        out = []
+        for H0rc, lab in [(1.0, r'$H_0 r_c = 1$ (N1)'),
+                          (5.0, r'$H_0 r_c = 5$ (N5)')]:
+            pars = _mg_base_pars()
+            pars.MG.set_nDGP(H0rc=H0rc)
+            results = camb.get_results(pars)
+            out.append((pars, results, lab))
+        return out
+    return _multi
+
+
+def setup_symmetron():
+    """Symmetron gravity (QSA)"""
+    def _multi():
+        out = []
+        for a_ssb, lab in [(0.5, r'$a_{\rm ssb}=0.5$, $\beta=1$, $L=1$ Mpc'),
+                           (0.33, r'$a_{\rm ssb}=0.33$, $\beta=1$, $L=1$ Mpc')]:
+            pars = _mg_base_pars()
+            pars.MG.set_symmetron(a_ssb=a_ssb, beta=1.0, L_Mpc=1.0)
+            results = camb.get_results(pars)
+            out.append((pars, results, lab))
+        return out
+    return _multi
+
+
 # ============================================================
 # MAIN
 # ============================================================
@@ -495,6 +547,9 @@ if __name__ == '__main__':
         (setup_interactingde(), 'Interacting Dark Energy', True),
         (setup_horndeski(), 'Horndeski Gravity', True),
         (setup_musigma(), 'Mu-Sigma Modified Gravity', True),
+        (setup_fr(), 'fR Gravity', True),
+        (setup_ndgp(), 'nDGP Gravity', True),
+        (setup_symmetron(), 'Symmetron Gravity', True),
         (setup_multi_idm(), 'Multi-Channel Interacting DM', True),
         (setup_fuzzydm_field(), 'Fuzzy DM Field', True),
     ]

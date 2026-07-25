@@ -23,4 +23,37 @@ Input parameter model
    :alt: mu-Sigma MG vs LCDM
    :width: 100%
 
+f(R) Gravity (Hu--Sawicki)
+--------------------------
+
+Linear quasi-static f(R) via :meth:`.MuSigmaMGParams.set_fR`:
+mu(a,k) = (1+4Q/3)/(1+Q) with Q = k^2/(a^2 M^2(a)), Sigma = 1, on an exact
+LCDM background. Linear theory only (no chameleon screening).
+
+.. image:: figures/fr_gravity.png
+   :alt: f(R) Hu-Sawicki vs LCDM
+   :width: 100%
+
+nDGP Gravity (Normal Branch)
+----------------------------
+
+Scale-independent growth enhancement via :meth:`.MuSigmaMGParams.set_nDGP`:
+mu(a) = 1 + 1/(3 beta(a)), Sigma = 1. Linear theory only (no Vainshtein
+screening).
+
+.. image:: figures/ndgp_gravity.png
+   :alt: nDGP vs LCDM
+   :width: 100%
+
+Symmetron Gravity
+-----------------
+
+Symmetry-breaking fifth force via :meth:`.MuSigmaMGParams.set_symmetron`:
+GR before a_ssb, then mu(a,k) = 1 + 2 beta(a)^2 k^2/(k^2 + a^2 m(a)^2),
+Sigma = 1. Linear theory only.
+
+.. image:: figures/symmetron_gravity.png
+   :alt: Symmetron vs LCDM
+   :width: 100%
+
 .. autoclass:: camb.model.CustomSources

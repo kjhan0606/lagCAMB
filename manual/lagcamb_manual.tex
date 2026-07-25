@@ -212,6 +212,9 @@ ETHOS Transfer (Physical) & DM & ETHOS params $\to T(k)$ & Cyr-Racine+ 2016 \\
 Interacting DE & DE & DM--DE energy exchange & Costa+ 2017 \\
 Horndeski & DE/MG & Scalar-tensor gravity (QSA) & Bellini \& Sawicki 2014 \\
 $\mu$-$\Sigma$ MG & MG & Phenomenological MG & Zhao+ 2009 \\
+$f(R)$ Hu--Sawicki & MG & Scalaron fifth force (QSA) & Hu \& Sawicki 2007 \\
+nDGP & MG & Brane-induced gravity (QSA) & Dvali+ 2000 \\
+Symmetron & MG & Symmetry-breaking fifth force (QSA) & Hinterbichler \& Khoury 2010 \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -955,7 +958,155 @@ results = camb.get_results(pars)
 \end{figure}
 
 \begin{notebox}
-$\mu$--$\Sigma$ MG is set via \texttt{pars.MG} (not \texttt{DarkMatter} or \texttt{DarkEnergy}). It is mutually exclusive with \texttt{HorndeskiDE}. This parameterization primarily modifies the Weyl potential (lensing) and has limited effect on the matter growth rate $\sigma_8$ in the current implementation.
+$\mu$--$\Sigma$ MG is set via \texttt{pars.MG} (not \texttt{DarkMatter} or \texttt{DarkEnergy}). It is mutually exclusive with \texttt{HorndeskiDE}. $\mu$ modifies matter growth (and hence $\sigma_8$) through an extra source in the $\eta k$ equation, and $\Sigma$ rescales the Weyl potential (lensing). The same machinery also powers the theory-specific QSA models below ($f(R)$, nDGP, Symmetron), selected via \texttt{pars.MG.set\_fR / set\_nDGP / set\_symmetron}.
+\end{notebox}
+
+
+% -------- f(R) Hu-Sawicki --------
+\newpage
+\subsection{$f(R)$ Gravity (Hu--Sawicki)}
+
+\begin{physbox}{Physics}
+Hu--Sawicki $f(R)$ gravity in the linear quasi-static approximation (QSA), MGCAMB-style. The scalaron $f_R \equiv \mathrm{d}f/\mathrm{d}R$ mediates a fifth force of range $1/M(a)$, modifying the Poisson equation:
+\begin{align}
+    \mu(a,k) &= \frac{1 + \tfrac{4}{3}\,Q}{1 + Q}, \qquad Q = \frac{k^2}{a^2 M^2(a)}, \\
+    M^2(a) &= \frac{1}{3 f_{RR}} = \frac{R^{\,n+2}}{3\,(n{+}1)\,|f_{R0}|\, R_0^{\,n+1}}, \qquad R(a) = 3 H_0^2\!\left( \Omega_m a^{-3} + 4 \Omega_\Lambda \right).
+\end{align}
+The conformal coupling leaves the matter-sourced Weyl potential unmodified ($\Sigma = 1$), so the gravitational slip $\gamma = \Phi/\Psi = (1+\tfrac{2}{3}Q)/(1+\tfrac{4}{3}Q)$ follows automatically. The background is exactly $\Lambda$CDM (accurate for $|f_{R0}| \ll 1$). On scales well inside the Compton radius $\mu \to 4/3$ (maximal fifth-force enhancement); on larger scales GR is recovered.
+\end{physbox}
+
+\begin{parambox}{Parameters}
+\begin{tabular}{llll}
+\toprule
+Name & Type & Default & Description \\
+\midrule
+\texttt{fR0} & float & 0.0 & $|f_{R0}|$ today ($10^{-4}$ = F4, $10^{-5}$ = F5, $10^{-6}$ = F6) \\
+\texttt{fR\_n} & float & 1.0 & Hu--Sawicki index $n$ \\
+\bottomrule
+\end{tabular}
+\end{parambox}
+
+\begin{lstlisting}
+import camb
+
+pars = camb.CAMBparams()
+pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+pars.set_for_lmax(2500, lens_potential_accuracy=1)
+pars.WantTransfer = True
+pars.set_matter_power(redshifts=[0], kmax=10.0)
+
+pars.MG.set_fR(1e-5, n=1.0)   # F5
+results = camb.get_results(pars)
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figures/fr_gravity.pdf}
+\caption{$f(R)$ Hu--Sawicki: the CMB TT spectrum is essentially unchanged (sub-percent lensing differences at high $\ell$), while $P(k)$ is enhanced for $k \gtrsim 0.01\,h/\mathrm{Mpc}$ with the characteristic scale-dependent shape, stronger for F4 than F5. Validation: linear F5 boost at $k \sim 1\,h/\mathrm{Mpc}$ is $\sim$40\%, consistent with the Winther et al.\ (2015) code comparison.}
+\end{figure}
+
+\begin{notebox}
+Linear theory only: chameleon screening is \emph{not} included, so nonlinear corrections (halofit) are not valid for this model. Use external boost factors (e.g.\ \texttt{ExternalNonLinearRatio} with emulator ratios) for nonlinear scales.
+\end{notebox}
+
+
+% -------- nDGP --------
+\newpage
+\subsection{nDGP Gravity (Normal Branch)}
+
+\begin{physbox}{Physics}
+Normal-branch Dvali--Gabadadze--Porrati brane-world gravity on a $\Lambda$CDM background. The brane-bending mode enhances the growth of structure in a \emph{scale-independent} way:
+\begin{align}
+    \mu(a) &= 1 + \frac{1}{3\beta(a)}, \qquad
+    \beta(a) = 1 + 2 H r_c \left( 1 + \frac{\dot H}{3 H^2} \right),
+\end{align}
+where $r_c$ is the crossover scale, parameterized by $\Omega_{rc} = 1/(4 r_c^2 H_0^2)$. The brane-bending mode does not couple to photons, so $\Sigma = 1$ and the slip $(3\beta-1)/(3\beta+1)$ follows automatically. At early times $\beta \to \infty$ and GR is recovered; the CMB is essentially unaffected.
+\end{physbox}
+
+\begin{parambox}{Parameters}
+\begin{tabular}{llll}
+\toprule
+Name & Type & Default & Description \\
+\midrule
+\texttt{Omega\_rc} & float & 0.0 & $\Omega_{rc} = 1/(4 r_c^2 H_0^2)$ \\
+\bottomrule
+\end{tabular}
+\end{parambox}
+
+\begin{lstlisting}
+import camb
+
+pars = camb.CAMBparams()
+pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+pars.set_for_lmax(2500, lens_potential_accuracy=1)
+pars.WantTransfer = True
+pars.set_matter_power(redshifts=[0], kmax=10.0)
+
+pars.MG.set_nDGP(H0rc=1.0)   # N1; equivalently Omega_rc=0.25
+results = camb.get_results(pars)
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figures/ndgp_gravity.pdf}
+\caption{nDGP: scale-independent enhancement of $P(k)$ ($\sim$14\% for N1, $\sim$3\% for N5 at $z=0$, consistent with the $\sim$15\% linear N1 boost of Winther et al.\ 2015), with the CMB essentially unchanged.}
+\end{figure}
+
+\begin{notebox}
+Linear theory only: Vainshtein screening is \emph{not} included, so halofit is not valid for this model. The normal branch requires a dark-energy component to reproduce the $\Lambda$CDM background; following standard practice the background here is exactly $\Lambda$CDM.
+\end{notebox}
+
+
+% -------- Symmetron --------
+\newpage
+\subsection{Symmetron Gravity}
+
+\begin{physbox}{Physics}
+Symmetron scalar field with a symmetry-breaking potential. Before symmetry breaking ($a \le a_{\rm ssb}$) the coupling vanishes and $\mu = 1$ exactly; afterwards a fifth force of finite range switches on:
+\begin{align}
+    \mu(a,k) &= 1 + 2\beta(a)^2 \frac{k^2}{k^2 + a^2 m(a)^2}, \\
+    \beta(a) &= \beta_* \sqrt{1 - \left(\frac{a_{\rm ssb}}{a}\right)^3}, \qquad
+    m(a) = \frac{1}{L}\sqrt{1 - \left(\frac{a_{\rm ssb}}{a}\right)^3},
+\end{align}
+with $L$ the Compton range today. The conformal coupling gives $\Sigma = 1$. Only scales $k \gtrsim a\,m(a)$ (i.e.\ inside the Compton radius) feel the enhancement, and only after $a_{\rm ssb}$, so the CMB and large scales are protected.
+\end{physbox}
+
+\begin{parambox}{Parameters}
+\begin{tabular}{llll}
+\toprule
+Name & Type & Default & Description \\
+\midrule
+\texttt{a\_ssb} & float & 0.5 & symmetry-breaking scale factor \\
+\texttt{beta\_sym} & float & 0.0 & coupling strength $\beta_*$ \\
+\texttt{L\_sym} & float & 1.0 & Compton range today [Mpc] \\
+\bottomrule
+\end{tabular}
+\end{parambox}
+
+\begin{lstlisting}
+import camb
+
+pars = camb.CAMBparams()
+pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
+pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+pars.set_for_lmax(2500, lens_potential_accuracy=1)
+pars.WantTransfer = True
+pars.set_matter_power(redshifts=[0], kmax=10.0)
+
+pars.MG.set_symmetron(a_ssb=0.5, beta=1.0, L_Mpc=1.0)
+results = camb.get_results(pars)
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figures/symmetron_gravity.pdf}
+\caption{Symmetron: $P(k)$ enhancement confined to $k \gtrsim 1/L$ and switching on only after $a_{\rm ssb}$ (earlier symmetry breaking gives a stronger boost); large scales and the CMB are essentially unchanged. For $a_{\rm ssb} \ge 1$ the model reduces to GR exactly.}
+\end{figure}
+
+\begin{notebox}
+Linear theory only: symmetron screening of collapsed objects is \emph{not} included, so halofit is not valid for this model.
 \end{notebox}
 
 
@@ -1137,10 +1288,15 @@ Index & Variable & Description \\
     \item Blackadder \& Koushiappas, PRD 90 (2014) 103527
     \item Bode, Ostriker \& Turok, ApJ 556 (2001) 93
     \item Boddy \& Gluscevic, PRD 98 (2018) 083510
+    \item Brax et al., JCAP 10 (2012) 002 [arXiv:1206.3568]
     \item Costa et al., JCAP 01 (2017) 028
     \item Cyr-Racine et al., PRD 93 (2016) 123527
+    \item Dvali, Gabadadze \& Porrati, PLB 485 (2000) 208
     \item He et al., Nature Astronomy (2025) [arXiv:2301.xxxxx]
+    \item Hinterbichler \& Khoury, PRL 104 (2010) 231301
     \item Hu, Barkana \& Gruzinov, PRL 85 (2000) 1158
+    \item Hu \& Sawicki, PRD 76 (2007) 064004
+    \item Koyama \& Maartens, JCAP 01 (2006) 016
     \item Lesgourgues \& Tram, JCAP 09 (2011) 032
     \item Lewis, Challinor \& Lasenby, ApJ 538 (2000) 473
     \item Mangano et al., NPB 756 (2006) 100
@@ -1149,6 +1305,7 @@ Index & Variable & Description \\
     \item Poulin et al., JCAP 08 (2016) 036
     \item Valiviita, Majerotto \& Maartens, JCAP 07 (2008) 020
     \item Viel et al., PRD 71 (2005) 063534
+    \item Winther et al., MNRAS 454 (2015) 4208 [arXiv:1506.06384]
     \item Zhao et al., PRD 79 (2009) 083513
     \item Zumalac\'arregui et al., JCAP 08 (2017) 019 [arXiv:1605.06102]
 \end{enumerate}

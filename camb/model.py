@@ -317,6 +317,17 @@ class MuSigmaMGParams(CAMB_Structure):
         ("lambda_sigma", c_double, "Sigma scale-dependence [Mpc] (0 = scale-independent)"),
         ("c1", c_double, "mu k-dependence coefficient"),
         ("c2", c_double, "Sigma k-dependence coefficient"),
+        ("model", c_int, "0=phenomenological mu-Sigma; 1=f(R) Hu-Sawicki; 2=nDGP; 3=Symmetron"),
+        ("fR0", c_double, "f(R): |f_R0| today (e.g. 1e-5 for F5)"),
+        ("fR_n", c_double, "f(R): Hu-Sawicki index n"),
+        ("Omega_rc", c_double, "nDGP: Omega_rc = 1/(4 rc^2 H0^2)"),
+        ("beta_sym", c_double, "Symmetron: coupling beta_*"),
+        ("a_ssb", c_double, "Symmetron: symmetry-breaking scale factor"),
+        ("L_sym", c_double, "Symmetron: Compton range today [Mpc]"),
+        ("bg_H0", c_double, "internal: H0 [1/Mpc], set by Fortran Init"),
+        ("bg_omm", c_double, "internal: Omega_m, set by Fortran Init"),
+        ("bg_omv", c_double, "internal: Omega_Lambda, set by Fortran Init"),
+        ("bg_omr", c_double, "internal: Omega_r, set by Fortran Init"),
     )
 
     def set_mu_a_table(self, a, mu):
@@ -365,6 +376,98 @@ class MuSigmaMGParams(CAMB_Structure):
     def clear_tables(self):
         """Drop any tabulated mu(a)/Sigma(a) and return to the analytic path."""
         _MuSigmaMG_ClearTables()
+        return self
+
+    def set_fR(self, fR0, n=1.0):
+        """
+        Hu-Sawicki f(R) gravity in the linear quasi-static approximation (MGCAMB-style).
+
+        mu(a,k) = (1 + 4Q/3)/(1 + Q) with Q = k^2/(a^2 M^2(a)) and scalaron mass
+        M^2(a) = R^{n+2}/(3(n+1)|fR0| R0^{n+1}); Sigma = 1 (lensing potential from
+        matter unmodified, slip gamma = (1+2Q/3)/(1+4Q/3) follows automatically).
+        Assumes the LCDM background (accurate for |fR0| << 1).
+
+        Note: linear theory only; chameleon screening is not included, so nonlinear
+        corrections (halofit) are not valid for this model.
+
+        :param fR0: |f_R0| today, e.g. 1e-4 (F4), 1e-5 (F5), 1e-6 (F6)
+        :param n: Hu-Sawicki index (default 1)
+        :return: self
+        """
+        if fR0 == 0:
+            raise CAMBValueError("set_fR: fR0 must be non-zero (use clear_MG_model() for GR)")
+        if n <= 0:
+            raise CAMBValueError("set_fR: n must be > 0")
+        self.model = 1
+        self.fR0 = abs(fR0)
+        self.fR_n = n
+        self.is_active = True
+        return self
+
+    def set_nDGP(self, Omega_rc=None, H0rc=None):
+        """
+        Normal-branch DGP gravity on an LCDM background (MGCAMB-style QSA).
+
+        mu(a) = 1 + 1/(3 beta(a)), beta(a) = 1 + 2 H rc (1 + Hdot/(3H^2));
+        scale-independent. Sigma = 1 (the brane-bending mode does not couple to
+        photons; slip (3beta-1)/(3beta+1) follows automatically).
+
+        Give exactly one of Omega_rc or H0rc, related by Omega_rc = 1/(4 (H0 rc)^2).
+
+        Note: linear theory only; Vainshtein screening is not included.
+
+        :param Omega_rc: 1/(4 rc^2 H0^2), e.g. 0.25 for H0 rc = 1
+        :param H0rc: crossover scale in units of the Hubble radius, e.g. 1 (N1), 5 (N5)
+        :return: self
+        """
+        if (Omega_rc is None) == (H0rc is None):
+            raise CAMBValueError("set_nDGP: give exactly one of Omega_rc or H0rc")
+        if H0rc is not None:
+            if H0rc <= 0:
+                raise CAMBValueError("set_nDGP: H0rc must be > 0")
+            Omega_rc = 1.0 / (4.0 * H0rc**2)
+        if Omega_rc <= 0:
+            raise CAMBValueError("set_nDGP: Omega_rc must be > 0")
+        self.model = 2
+        self.Omega_rc = Omega_rc
+        self.is_active = True
+        return self
+
+    def set_symmetron(self, a_ssb=0.5, beta=1.0, L_Mpc=1.0):
+        """
+        Symmetron gravity in the linear quasi-static approximation.
+
+        For a <= a_ssb the symmetry is unbroken and mu = 1 (fully screened).
+        Afterwards mu(a,k) = 1 + 2 beta(a)^2 k^2/(k^2 + a^2 m(a)^2) with
+        beta(a) = beta sqrt(1-(a_ssb/a)^3) and m(a) = sqrt(1-(a_ssb/a)^3)/L.
+        Sigma = 1. Assumes the LCDM background.
+
+        Note: linear theory only; symmetron screening of collapsed objects is
+        not included.
+
+        :param a_ssb: scale factor of symmetry breaking (must be < 1 to have any effect)
+        :param beta: coupling strength beta_*
+        :param L_Mpc: Compton range of the field today [Mpc]
+        :return: self
+        """
+        if not 0 < a_ssb:
+            raise CAMBValueError("set_symmetron: a_ssb must be > 0")
+        if L_Mpc <= 0:
+            raise CAMBValueError("set_symmetron: L_Mpc must be > 0")
+        self.model = 3
+        self.a_ssb = a_ssb
+        self.beta_sym = beta
+        self.L_sym = L_Mpc
+        self.is_active = True
+        return self
+
+    def clear_MG_model(self):
+        """Return to GR / the phenomenological mu-Sigma path (model = 0)."""
+        self.model = 0
+        self.fR0 = 0.0
+        self.Omega_rc = 0.0
+        self.beta_sym = 0.0
+        self.is_active = self.mu_0 != 0 or self.sigma_0 != 0
         return self
 
 

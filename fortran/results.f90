@@ -525,7 +525,10 @@
         if (allocated(this%CP%DarkMatter)) then
             call this%CP%DarkMatter%Init(this)
         end if
-        call this%CP%MG%Init()
+        ! LCDM background constants for the theory-specific QSA models (f(R)/nDGP/Symmetron)
+        call this%CP%MG%Init(this%CP%H0*1000/c, &
+            (this%CP%omch2 + this%CP%ombh2 + this%CP%omnuh2)/h2, &
+            this%Omega_de, (this%grhog + this%grhornomass)/this%grhocrit)
         if (global_error_flag==0) this%tau0=this%TimeOfz(0._dl)
         if (global_error_flag==0) then
             this%chi0=this%rofChi(this%tau0/this%curvature_radius)

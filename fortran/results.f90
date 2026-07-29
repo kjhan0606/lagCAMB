@@ -1109,9 +1109,9 @@
     integer i
 
     do i=1, n
-        call this%CP%DarkEnergy%BackgroundDensityAndPressure(1._dl, a(i), grhov_t(i), w(i))
+        call this%CP%DarkEnergy%BackgroundDensityAndPressure(this%grhov, a(i), grhov_t(i), w(i))
     end do
-    grhov_t = grhov_t/a**2
+    grhov_t = grhov_t/a**2/this%grhov
 
     end subroutine CAMBdata_DarkEnergyStressEnergy
 

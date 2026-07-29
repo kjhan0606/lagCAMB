@@ -247,11 +247,15 @@ class TrackerQuintessence(Quintessence):
 
     with :math:`\phi` in reduced Planck units. The amplitude :math:`A` is fixed by shooting
     (bisection on :math:`\ln A`) so that :math:`\Omega_\phi(a=1)` equals the dark-energy budget.
-    The field starts frozen (:math:`d\phi/dN=0`) at ``phi_ini`` at :math:`a=10^{-6}`.
+    ``ic_mode=0`` starts the field frozen (:math:`d\phi/dN=0`) at ``phi_ini`` at
+    :math:`a=10^{-6}`. ``ic_mode=1`` selects the matter-era Ratra--Peebles tracker
+    and computes the initial field from the trial amplitude at every shooting step;
+    this is the physical :math:`\phi`CDM path.
     """
 
     _fields_ = (
         ("pot_type", c_int, "1=Ratra-Peebles (phi^-alpha), 2=exponential (exp(-lam*phi))"),
+        ("ic_mode", c_int, "0=frozen phi_ini, 1=matter-era Ratra-Peebles tracker (phiCDM)"),
         ("alpha", c_double, "Ratra-Peebles exponent (V ~ phi^-alpha)"),
         ("lam", c_double, "exponential slope (V ~ exp(-lam*phi))"),
         ("phi_ini", c_double, "initial field value at a=astart (reduced Planck units)"),
@@ -267,16 +271,24 @@ class TrackerQuintessence(Quintessence):
     )
     _fortran_class_name_ = "TTrackerQuintessence"
 
-    def set_params(self, pot_type=1, alpha=1.0, lam=1.0, phi_ini=0.01):
+    def set_params(self, pot_type=1, ic_mode=0, alpha=1.0, lam=1.0, phi_ini=0.01):
         """
         Set tracker quintessence parameters.
 
         :param pot_type: 1=Ratra-Peebles (V ~ phi^-alpha), 2=exponential (V ~ exp(-lam*phi))
+        :param ic_mode: 0=frozen phi_ini; 1=matter-era Ratra-Peebles tracker (physical phiCDM)
         :param alpha: Ratra-Peebles exponent
         :param lam: exponential slope
         :param phi_ini: initial (frozen) field value at a=1e-6 in reduced Planck units
         """
+        if ic_mode not in (0, 1):
+            raise ValueError("ic_mode must be 0 (frozen) or 1 (Ratra-Peebles tracker)")
+        if ic_mode == 1 and pot_type != 1:
+            raise ValueError("ic_mode=1 is defined only for the Ratra-Peebles potential")
+        if alpha <= 0 or lam <= 0 or (ic_mode == 0 and phi_ini <= 0):
+            raise ValueError("active tracker-quintessence parameters must be positive")
         self.pot_type = pot_type
+        self.ic_mode = ic_mode
         self.alpha = alpha
         self.lam = lam
         self.phi_ini = phi_ini

@@ -93,6 +93,7 @@
     ! but with CAMB's full background (radiation + neutrinos) retained.
     type, extends(TQuintessence) :: TTrackerQuintessence
         integer  :: pot_type = 1        !1=Ratra-Peebles, 2=exponential
+        integer  :: ic_mode = 0         !0=frozen phi_ini, 1=matter-era RP tracker (phiCDM)
         real(dl) :: alpha = 1._dl       !Ratra-Peebles exponent (V ~ phi^-alpha)
         real(dl) :: lam = 1._dl         !exponential slope (V ~ exp(-lam*phi))
         real(dl) :: phi_ini = 0.01_dl   !initial field value at a=astart
@@ -876,10 +877,30 @@
     real(dl) c(24), w(NumEqs,9), y(NumEqs)
     real(dl), parameter :: splZero = 0._dl
     real(dl) afrom, aend, a2, a_cur, phi_end, phidot_end
+    real(dl) qtrack, omega_m, e2_m, lnphi, v_ini, adot_ini
     integer ind, i, ix, tot_points
 
-    y(1) = this%phi_ini
-    y(2) = 0._dl                       !dphi/dN = 0  =>  a^2 phi' = 0
+    if (this%ic_mode == 1) then
+        ! Matter-era Ratra-Peebles power-law attractor, in the same reduced
+        ! Planck and A/rho_crit0 convention used by scalar_de_commons.f90.
+        ! Since lnA is shot below, recompute phi_ini for every trial.
+        qtrack = 3._dl/(this%alpha + 2._dl)
+        omega_m = (this%State%grhoc + this%State%grhob)/this%State%grhocrit
+        e2_m = omega_m/this%astart**3
+        lnphi = (log(3._dl*this%alpha) + this%lnA - &
+            log(e2_m*(qtrack*qtrack + 1.5_dl*qtrack)))/(this%alpha + 2._dl)
+        y(1) = exp(lnphi)
+        v_ini = qtrack*y(1)
+        ! y(2)=a^2*dphi/dtau and dphi/dN=y(2)/(a*adot).
+        ! Include CAMB's radiation in adot while preserving the same
+        ! matter-tracker field value and logarithmic derivative as lagRamses.
+        adot_ini = sqrt((this%State%grho_no_de(this%astart) + &
+            this%astart**4*this%Vofphi(y(1),0))/(3._dl - 0.5_dl*v_ini**2))
+        y(2) = v_ini*this%astart*adot_ini
+    else
+        y(1) = this%phi_ini
+        y(2) = 0._dl                   !dphi/dN = 0  =>  a^2 phi' = 0
+    end if
     tot_points = this%npoints_log + this%npoints_linear
 
     if (fill) then
@@ -964,6 +985,13 @@
 
     this%astart = 1.d-6                 !start field integration at a=1e-6 (as N-body solver)
     this%integrate_tol = 1.d-10         !tight enough for |Omega_phi/Omega_de-1| << 1e-8
+    if (this%ic_mode < 0 .or. this%ic_mode > 1) &
+        call MpiStop('TTrackerQuintessence: ic_mode must be 0 or 1')
+    if (this%ic_mode == 1 .and. this%pot_type /= 1) &
+        call MpiStop('TTrackerQuintessence: tracker ic_mode requires Ratra-Peebles pot_type=1')
+    if (this%alpha <= 0._dl .or. this%lam <= 0._dl .or. &
+        (this%ic_mode == 0 .and. this%phi_ini <= 0._dl)) &
+        call MpiStop('TTrackerQuintessence: active potential/initial parameters must be positive')
     call this%TQuintessence%Init(State)
     call this%Tracker_solve()           !via this% so an extending type's dynamic type survives to EvolveBackground
 
@@ -1037,6 +1065,7 @@
 
     call this%TDarkEnergyModel%ReadParams(Ini)
     this%pot_type = Ini%Read_Int('quint_pot_type', this%pot_type)
+    this%ic_mode = Ini%Read_Int('quint_ic_mode', this%ic_mode)
     this%alpha = Ini%Read_Double('quint_alpha', this%alpha)
     this%lam = Ini%Read_Double('quint_lam', this%lam)
     this%phi_ini = Ini%Read_Double('quint_phi_ini', this%phi_ini)

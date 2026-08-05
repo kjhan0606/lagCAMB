@@ -66,7 +66,11 @@
         !       Sigma = 1.
         ! Sigma=1 with the induced slip eta = 2/mu - 1 reproduces each theory's QSA
         ! slip exactly (f(R): (1+2Q/3)/(1+4Q/3); nDGP: (3beta-1)/(3beta+1)).
-        integer :: model = 0             ! 0=phenomenological mu-Sigma above
+        !   4 = lagRamses phenomenological Horndeski benchmark:
+        !       mu = 1 + mu_0 [Omega_DE(a)/Omega_DE(1)]
+        !                    k^2/[k^2 + (a m)^2], Sigma = 1.
+        !       For model=4 lambda_mu stores m in physical 1/Mpc.
+        integer :: model = 0             ! 0=phenom.; 1=f(R); 2=nDGP; 3=Sym.; 4=lagRamses HS
         real(dl) :: fR0 = 0._dl          ! f(R): |f_R0| today (e.g. 1e-5 for F5)
         real(dl) :: fR_n = 1._dl         ! f(R): Hu-Sawicki index n
         real(dl) :: Omega_rc = 0._dl     ! nDGP: Omega_rc = 1/(4 rc^2 H0^2)
@@ -125,6 +129,8 @@
         this%is_active = this%Omega_rc > 0._dl
     case (3)  ! Symmetron
         this%is_active = this%beta_sym /= 0._dl .and. this%L_sym > 0._dl
+    case (4)  ! lagRamses phenomenological Horndeski benchmark
+        this%is_active = this%mu_0 /= 0._dl .and. this%lambda_mu >= 0._dl
     case default
         ! Active if the analytic amplitudes are non-zero OR a table has been supplied.
         this%is_active = (this%mu_0 /= 0._dl .or. this%sigma_0 /= 0._dl &
@@ -180,6 +186,13 @@
         if (a <= this%a_ssb) return
         s = 1 - (this%a_ssb/a)**3
         mu = 1 + 2*this%beta_sym**2*s * k**2/(k**2 + a**2*s/this%L_sym**2)
+    case (4)
+        ! Exact counterpart of lagRamses horndeski_mu_of_a plus its
+        ! base-grid Fourier scale dependence. Omega_DE_a/bg_omv equals
+        ! f_DE(a)/E^2(a), and lambda_mu stores m in physical 1/Mpc.
+        if (a <= 0._dl .or. k <= 0._dl .or. this%bg_omv <= 0._dl) return
+        mu = 1 + this%mu_0 * (Omega_DE_a/this%bg_omv) * k**2 / &
+            (k**2 + (a*this%lambda_mu)**2)
     case default
         ! Tabulated mode takes precedence when a mu table is present (scale independent).
         if (mg_mu_table_set) then

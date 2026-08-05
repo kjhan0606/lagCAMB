@@ -317,7 +317,7 @@ class MuSigmaMGParams(CAMB_Structure):
         ("lambda_sigma", c_double, "Sigma scale-dependence [Mpc] (0 = scale-independent)"),
         ("c1", c_double, "mu k-dependence coefficient"),
         ("c2", c_double, "Sigma k-dependence coefficient"),
-        ("model", c_int, "0=phenomenological mu-Sigma; 1=f(R) Hu-Sawicki; 2=nDGP; 3=Symmetron"),
+        ("model", c_int, "0=phenomenological mu-Sigma; 1=f(R); 2=nDGP; 3=Symmetron; 4=lagRamses Horndeski"),
         ("fR0", c_double, "f(R): |f_R0| today (e.g. 1e-5 for F5)"),
         ("fR_n", c_double, "f(R): Hu-Sawicki index n"),
         ("Omega_rc", c_double, "nDGP: Omega_rc = 1/(4 rc^2 H0^2)"),
@@ -376,6 +376,28 @@ class MuSigmaMGParams(CAMB_Structure):
     def clear_tables(self):
         """Drop any tabulated mu(a)/Sigma(a) and return to the analytic path."""
         _MuSigmaMG_ClearTables()
+        return self
+
+    def set_lagramses_horndeski(self, mu0=0.1, mass_hmpc=0.1, h=0.6766):
+        """Match the lagRamses quasi-static Horndeski benchmark exactly.
+
+        The N-body parameterization is
+        ``mu=1+mu0*Omega_DE(a)/Omega_DE(1)*k^2/(k^2+(a*m)^2)`` with
+        ``m`` in h/Mpc. CAMB evolves physical-Mpc wavenumbers, so the stored
+        model-4 mass is ``mass_hmpc*h`` in 1/Mpc. Lensing is left at
+        Sigma=1, as in the density-only lagRamses production benchmark.
+        """
+        if mu0 == 0:
+            raise CAMBValueError("Horndeski mu0 must be non-zero")
+        if mass_hmpc < 0 or h <= 0:
+            raise CAMBValueError("Horndeski mass must be >=0 and h must be >0")
+        self.clear_tables()
+        self.model = 4
+        self.mu_0 = float(mu0)
+        self.sigma_0 = 0.0
+        self.lambda_mu = float(mass_hmpc) * float(h)
+        self.lambda_sigma = 0.0
+        self.is_active = True
         return self
 
     def set_fR(self, fR0, n=1.0):

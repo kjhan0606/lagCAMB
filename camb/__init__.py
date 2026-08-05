@@ -40,8 +40,12 @@ from .camb import (
 )
 from .dark_energy import Chaplygin, DarkEnergyFluid, DarkEnergyPPF, InteractingDE, KEssence, RunningVacuum
 from .dark_matter import (
-    DMBaryonScattering, DMDR_ETHOS, DecayingDM,
-    DMNeutrinoScattering, WarmDM, FuzzyDM,
+    DMDR_ETHOS,
+    DecayingDM,
+    DMBaryonScattering,
+    DMNeutrinoScattering,
+    FuzzyDM,
+    WarmDM,
 )
 from .initialpower import InitialPowerLaw, SplinedInitialPower
 from .mathutils import threej

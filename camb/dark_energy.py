@@ -366,8 +366,7 @@ class InteractingDE(DarkEnergyEqnOfState):
 
     _methods_ = (("SetIDEParams", [POINTER(c_double), POINTER(c_int), POINTER(c_double)]),)
 
-    def set_params(self, w=-1.0, wa=0, xi_ide=0.0, interaction_type=1,
-                   cs2_ide=1.0, **kwargs):
+    def set_params(self, w=-1.0, wa=0, xi_ide=0.0, interaction_type=1, cs2_ide=1.0, **kwargs):
         """
         Set interacting DE parameters. Must be called as a single method
         (not via individual attribute assignment).
@@ -580,8 +579,17 @@ class FuzzyDMField(DarkEnergyModel):
     _fortran_class_module_ = "FuzzyDMField"
     _fortran_class_name_ = "TFuzzyDMField"
 
-    def set_params(self, m_axion=1e-22, f_axion=0.0, omega_axion_h2=0.0, N_match=100,
-                   potential_type=1, n_potential=1, f_decay=1.0, use_improved_efa=True):
+    def set_params(
+        self,
+        m_axion=1e-22,
+        f_axion=0.0,
+        omega_axion_h2=0.0,
+        N_match=100,
+        potential_type=1,
+        n_potential=1,
+        f_decay=1.0,
+        use_improved_efa=True,
+    ):
         """
         Set fuzzy DM field parameters.
 
@@ -632,14 +640,19 @@ class HorndeskiDE(DarkEnergyEqnOfState):
     _fortran_class_name_ = "THorndeskiDE"
 
     _methods_ = (
-        ("SetHorndeskiParams", [
-            POINTER(c_double), POINTER(c_double), POINTER(c_double),
-            POINTER(c_double), POINTER(c_double),
-        ]),
+        (
+            "SetHorndeskiParams",
+            [
+                POINTER(c_double),
+                POINTER(c_double),
+                POINTER(c_double),
+                POINTER(c_double),
+                POINTER(c_double),
+            ],
+        ),
     )
 
-    def set_params(self, w=-1.0, wa=0, alpha_K=0.0, alpha_B=0.0,
-                   alpha_M=0.0, alpha_T=0.0, M_star_ini=1.0, **kwargs):
+    def set_params(self, w=-1.0, wa=0, alpha_K=0.0, alpha_B=0.0, alpha_M=0.0, alpha_T=0.0, M_star_ini=1.0, **kwargs):
         """
         Set Horndeski gravity parameters.
 
@@ -666,13 +679,15 @@ class HorndeskiDE(DarkEnergyEqnOfState):
 
 
 # short names for models that support w/wa
-F2003Class._class_names.update({
-    "fluid": DarkEnergyFluid,
-    "ppf": DarkEnergyPPF,
-    "kessence": KEssence,
-    "chaplygin": Chaplygin,
-    "interacting_de": InteractingDE,
-    "running_vacuum": RunningVacuum,
-    "fuzzy_dm_field": FuzzyDMField,
-    "horndeski": HorndeskiDE,
-})
+F2003Class._class_names.update(
+    {
+        "fluid": DarkEnergyFluid,
+        "ppf": DarkEnergyPPF,
+        "kessence": KEssence,
+        "chaplygin": Chaplygin,
+        "interacting_de": InteractingDE,
+        "running_vacuum": RunningVacuum,
+        "fuzzy_dm_field": FuzzyDMField,
+        "horndeski": HorndeskiDE,
+    }
+)

@@ -200,6 +200,8 @@ class CAMBdata(F2003Class):
         ("grhov", c_double, "Dark energy contribution"),
         ("grhornomass", c_double, "grhor*number of massless neutrino species"),
         ("grhok", c_double, "curvature contribution to critical density"),
+        ("grhodmdr", c_double, "interacting dark-matter contribution"),
+        ("grhodr", c_double, "interacting dark-radiation contribution"),
         ("taurst", c_double, "time at start of recombination"),
         ("dtaurec", c_double, "time step in recombination"),
         ("taurend", c_double, "time at end of recombination"),

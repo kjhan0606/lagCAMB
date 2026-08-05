@@ -204,12 +204,15 @@ class DecayingDM(DarkMatterModel):
     def validate_params(self):
         if self.Gamma_dcdm < 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("Gamma_dcdm must be non-negative")
         if not (0 < self.epsilon_dcdm <= 1):
             from .baseconfig import CAMBError
+
             raise CAMBError("epsilon_dcdm must be in (0, 1]")
         if not (0 <= self.f_dcdm <= 1):
             from .baseconfig import CAMBError
+
             raise CAMBError("f_dcdm must be in [0, 1]")
 
 
@@ -254,9 +257,11 @@ class DMNeutrinoScattering(DarkMatterModel):
     def validate_params(self):
         if self.sigma_dmnu < 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("sigma_dmnu must be non-negative")
         if self.m_dm <= 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("m_dm must be positive")
 
 
@@ -290,8 +295,7 @@ class WarmDM(DarkMatterModel):
     _fortran_class_module_ = "WarmDM"
     _fortran_class_name_ = "TWarmDM"
 
-    def set_params(self, m_wdm=3.0, T_wdm_ratio=1.0, Omega_wdm_h2=0.0,
-                   boltzmann_mode=False):
+    def set_params(self, m_wdm=3.0, T_wdm_ratio=1.0, Omega_wdm_h2=0.0, boltzmann_mode=False):
         """
         Set warm DM parameters.
 
@@ -309,9 +313,11 @@ class WarmDM(DarkMatterModel):
     def validate_params(self):
         if self.m_wdm <= 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("m_wdm must be positive")
         if self.T_wdm_ratio <= 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("T_wdm_ratio must be positive")
 
 
@@ -357,9 +363,11 @@ class FuzzyDM(DarkMatterModel):
     def validate_params(self):
         if self.m_axion <= 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("m_axion must be positive")
         if self.f_axion < 0 or self.f_axion > 1:
             from .baseconfig import CAMBError
+
             raise CAMBError("f_axion must be in [0, 1]")
 
 
@@ -373,6 +381,7 @@ class MultiInteractingDM(DarkMatterModel):
 
     Reference: Becker+ 2021 (arXiv:2010.04074)
     """
+
     _fields_ = [
         ("omdmdrh2", c_double),
         ("N_dark", c_double),
@@ -389,11 +398,20 @@ class MultiInteractingDM(DarkMatterModel):
     _fortran_class_module_ = "MultiInteractingDM"
     _fortran_class_name_ = "TMultiInteractingDM"
 
-    def set_params(self, omdmdrh2=0., N_dark=0., a_dark=None,
-                   alpha_l_dark=1., lmax_dr=15,
-                   sigma_dmb=0., n_dmb=0,
-                   u_idm_g=0., n_idm_g=0,
-                   m_dm=100., cs2_dm=0.):
+    def set_params(
+        self,
+        omdmdrh2=0.0,
+        N_dark=0.0,
+        a_dark=None,
+        alpha_l_dark=1.0,
+        lmax_dr=15,
+        sigma_dmb=0.0,
+        n_dmb=0,
+        u_idm_g=0.0,
+        n_idm_g=0,
+        m_dm=100.0,
+        cs2_dm=0.0,
+    ):
         self.omdmdrh2 = omdmdrh2
         self.N_dark = N_dark
         if a_dark is not None:
@@ -411,6 +429,7 @@ class MultiInteractingDM(DarkMatterModel):
     def validate_params(self):
         if self.m_dm <= 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("m_dm must be positive")
 
 
@@ -458,9 +477,11 @@ class ETHOSTransferMurgia(DarkMatterModel):
     def validate_params(self):
         if self.alpha_mpch < 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("alpha_mpch must be non-negative")
         if self.beta_mur <= 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("beta_mur must be positive")
 
 
@@ -516,10 +537,21 @@ class ETHOSTransferPhysical(DarkMatterModel):
     _fortran_class_module_ = "ETHOSTransferPhysical"
     _fortran_class_name_ = "TETHOSTransferPhysical"
 
-    def set_params(self, a_dark_n=0.0, xi_dr=0.5, omdmdrh2=0.12, n_dark=2,
-                   A0_fit=0.5, a_ref=1e-4, xi_ref=0.5,
-                   p_a=0.25, p_xi=1.0, p_om=-0.1,
-                   beta_mur=2.24, gamma_mur=-4.46):
+    def set_params(
+        self,
+        a_dark_n=0.0,
+        xi_dr=0.5,
+        omdmdrh2=0.12,
+        n_dark=2,
+        A0_fit=0.5,
+        a_ref=1e-4,
+        xi_ref=0.5,
+        p_a=0.25,
+        p_xi=1.0,
+        p_om=-0.1,
+        beta_mur=2.24,
+        gamma_mur=-4.46,
+    ):
         """
         Set ETHOS physical-surrogate parameters. The derived ``alpha_mpch``
         is computed here and stored, so it can be read back from the
@@ -545,16 +577,14 @@ class ETHOSTransferPhysical(DarkMatterModel):
         self.beta_mur = beta_mur
         self.gamma_mur = gamma_mur
         if a_dark_n > 0 and xi_dr > 0:
-            self.alpha_mpch = (A0_fit
-                * (a_dark_n / a_ref) ** p_a
-                * (xi_dr / xi_ref) ** p_xi
-                * (omdmdrh2 / 0.12) ** p_om)
+            self.alpha_mpch = A0_fit * (a_dark_n / a_ref) ** p_a * (xi_dr / xi_ref) ** p_xi * (omdmdrh2 / 0.12) ** p_om
         else:
             self.alpha_mpch = 0.0
         self.validate_params()
 
     def validate_params(self):
         from .baseconfig import CAMBError
+
         if self.a_dark_n < 0:
             raise CAMBError("a_dark_n must be non-negative")
         if self.xi_dr <= 0:
@@ -569,6 +599,7 @@ class DMPhotonScattering(DarkMatterModel):
     DM-Photon scattering model (Boddy & Gluscevic 2018).
     sigma = sigma_Th * u_idm_g * (m_DM / 100 GeV) * (T/T_0)^n_idm_g
     """
+
     _fields_ = [
         ("u_idm_g", c_double),
         ("n_idm_g", c_int),
@@ -577,7 +608,7 @@ class DMPhotonScattering(DarkMatterModel):
     _fortran_class_module_ = "DMPhoton"
     _fortran_class_name_ = "TDMPhotonScattering"
 
-    def set_params(self, u_idm_g=0., n_idm_g=0, m_dm=100.):
+    def set_params(self, u_idm_g=0.0, n_idm_g=0, m_dm=100.0):
         self.u_idm_g = u_idm_g
         self.n_idm_g = n_idm_g
         self.m_dm = m_dm
@@ -586,9 +617,11 @@ class DMPhotonScattering(DarkMatterModel):
     def validate_params(self):
         if self.u_idm_g < 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("u_idm_g must be non-negative")
         if self.m_dm <= 0:
             from .baseconfig import CAMBError
+
             raise CAMBError("m_dm must be positive")
 
 

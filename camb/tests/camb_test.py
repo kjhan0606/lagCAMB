@@ -64,7 +64,7 @@ class CambTest(unittest.TestCase):
         pars.nu_mass_degeneracies[1] = 5
         self.assertTrue(pars.nu_mass_degeneracies[1] == 5)
         with self.assertRaises(CAMBParamRangeError):
-            pars.nu_mass_degeneracies = np.zeros(7)
+            pars.nu_mass_degeneracies = np.zeros(model.max_nu + 1)
         pars.nu_mass_eigenstates = 0
         self.assertFalse(len(pars.nu_mass_degeneracies[:1]))
         pars = camb.set_params(**{"InitPower.ns": 1.2, "WantTransfer": True})
@@ -156,6 +156,8 @@ class CambTest(unittest.TestCase):
 
         data = camb.CAMBdata()
         data.calc_background(pars)
+        self.assertEqual(data.grhodmdr, 0)
+        self.assertEqual(data.grhodr, 0)
 
         DA = data.angular_diameter_distance(0.57)
         H = data.hubble_parameter(0.27)

@@ -544,6 +544,44 @@ class CambTest(unittest.TestCase):
         self.assertAlmostEqual(cls2[1, 0], 1.30388e-10, places=13)
         self.assertAlmostEqual(cls[1, 0], 0)
 
+    def testLagRamsesHorndeski(self):
+        h = 0.6766
+        pars = camb.CAMBparams()
+        pars.set_cosmology(H0=100 * h, ombh2=0.02242, omch2=0.11933, mnu=0, omk=0)
+        pars.InitPower.set_params(ns=0.9665, As=2.1e-9)
+        pars.set_matter_power(redshifts=[49.0, 0.0], kmax=1.0, silent=True)
+
+        gr_results = camb.get_results(pars)
+        gr_kh, gr_z, gr_pk = gr_results.get_linear_matter_power_spectrum()
+
+        mg_pars = pars.copy()
+        mg_pars.MG.set_lagramses_horndeski(mu0=0.1, mass_hmpc=0.1, h=h)
+        self.assertEqual(mg_pars.MG.model, 4)
+        self.assertTrue(mg_pars.MG.is_active)
+        self.assertAlmostEqual(mg_pars.MG.lambda_mu, 0.1 * h)
+        self.assertEqual(mg_pars.MG.sigma_0, 0)
+
+        mg_results = camb.get_results(mg_pars)
+        mg_kh, mg_z, mg_pk = mg_results.get_linear_matter_power_spectrum()
+        np.testing.assert_allclose(mg_kh, gr_kh)
+        np.testing.assert_allclose(mg_z, gr_z)
+
+        z_initial = np.argmin(np.abs(mg_z - 49.0))
+        z_final = np.argmin(np.abs(mg_z))
+        initial_ratio = mg_pk[z_initial] / gr_pk[z_initial]
+        final_ratio = mg_pk[z_final] / gr_pk[z_final]
+        low_k = np.argmin(np.abs(mg_kh - 0.01))
+        high_k = np.argmin(np.abs(mg_kh - 0.5))
+
+        np.testing.assert_allclose(initial_ratio, 1, rtol=2e-4)
+        self.assertGreater(final_ratio[high_k], final_ratio[low_k] + 1e-3)
+        self.assertGreater(final_ratio[high_k], 1.001)
+
+        with self.assertRaises(CAMBValueError):
+            camb.CAMBparams().MG.set_lagramses_horndeski(mu0=0)
+        with self.assertRaises(CAMBValueError):
+            camb.CAMBparams().MG.set_lagramses_horndeski(mass_hmpc=-0.1)
+
     def testSave(self):
         pars = camb.set_params(H0=67.5, ombh2=0.022, omch2=0.122, As=2e-9, ns=0.95, redshifts=[0.4, 31.5], kmax=0.1)
         pars.set_dark_energy(w=-0.7, wa=0.2, dark_energy_model="ppf")

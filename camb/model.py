@@ -1359,9 +1359,7 @@ class CAMBparams(F2003Class):
             raise CAMBValueError("Need at least 2 q-points for custom PSD")
         nq = c_int(len(q))
         ni = c_int(nu_index + 1)
-        _SetCustomNuPSD(byref(ni), byref(nq),
-                        q.ctypes.data_as(POINTER(c_double)),
-                        f0.ctypes.data_as(POINTER(c_double)))
+        _SetCustomNuPSD(byref(ni), byref(nq), q.ctypes.data_as(POINTER(c_double)), f0.ctypes.data_as(POINTER(c_double)))
 
     @staticmethod
     def clear_ncdm_psd():

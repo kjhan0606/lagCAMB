@@ -848,6 +848,10 @@
     if (allocated(ThermalNuBackground%p1)) deallocate(ThermalNuBackground%p1)
     if (allocated(ThermalNuBackground%dr1)) deallocate(ThermalNuBackground%dr1)
     if (allocated(ThermalNuBackground%dp1)) deallocate(ThermalNuBackground%dp1)
+    if (allocated(ThermalNuBackground%pp1)) deallocate(ThermalNuBackground%pp1)
+    if (allocated(ThermalNuBackground%dpp1)) deallocate(ThermalNuBackground%dpp1)
+    if (allocated(ThermalNuBackground%iv21)) deallocate(ThermalNuBackground%iv21)
+    if (allocated(ThermalNuBackground%div21)) deallocate(ThermalNuBackground%div21)
 
     end subroutine CAMB_FreeGlobalMemory
 

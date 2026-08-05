@@ -590,6 +590,26 @@ def num_unequal(filename, cmpFcn):
             newMat[0] = newMat[0][1:]
         else:
             newBase = 0
+
+    # lagCAMB appends named DM-DR transfer columns to the upstream CAMB
+    # format.  Compare every upstream column by name while requiring the fork
+    # columns to remain present; do not relax column matching for other files.
+    if fnmatch.fnmatch(filename, "*transfer_out*.dat") and origBase == 1 and newBase == 1:
+        orig_cols = origMat[0]
+        new_cols = newMat[0]
+        required_extension_cols = ("dm_dr", "dark_rad")
+        missing = [name for name in orig_cols if name not in new_cols]
+        missing_extensions = [name for name in required_extension_cols if name not in new_cols]
+        if missing or missing_extensions:
+            if args.verbose_diff_output:
+                printlog(
+                    "named transfer columns missing in %s: reference=%s extensions=%s"
+                    % (filename, missing, missing_extensions)
+                )
+            return True
+        new_indices = [new_cols.index(name) for name in orig_cols]
+        newMat = [orig_cols] + [[row[index] for index in new_indices] for row in newMat[1:]]
+
     if len(origMat) - origBase != len(newMat) - newBase:
         if args.verbose_diff_output:
             printlog("num rows do not match in %s: %d != %d" % (filename, len(origMat), len(newMat)))

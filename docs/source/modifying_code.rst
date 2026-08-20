@@ -7,7 +7,7 @@ Although CAMB supports some non-standard models by default (e.g. some early dark
 model you'll generally need to modify the code. Simple cases that do not need code modification are:
 
 - Dark energy fluid models with a given equation of state but constant sound speed (see :doc:`dark_energy`)
-- Interacting dark energy with DM-DE coupling (see :class:`~camb.dark_energy.InteractingDE`)
+- Type-1 interacting dark energy with :math:`Q=\xi H\rho_{de}` (see :class:`~camb.dark_energy.InteractingDE`)
 - Dark matter interaction models: DM-baryon, DM-neutrino, DM-DR (ETHOS), decaying DM, warm DM, fuzzy DM (see :doc:`dark_matter`)
 - Different primordial power spectra (see :doc:`initialpower`)
 - Different BBN mappings for the Helium abundance (which is pure Python, see :doc:`bbn`)

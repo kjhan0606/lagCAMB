@@ -398,6 +398,8 @@
 
     call this%Reion%Validate(OK)
     call this%Recomb%Validate(OK)
+    if (allocated(this%DarkEnergy)) call this%DarkEnergy%Validate(OK)
+    if (allocated(this%DarkMatter)) call this%DarkMatter%Validate(OK)
 
     if (this%WantTransfer) then
         if (this%transfer%PK_num_redshifts > max_transfer_redshifts .or. this%transfer%PK_num_redshifts<1) then

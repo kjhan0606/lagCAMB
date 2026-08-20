@@ -3,6 +3,8 @@
     use results
     use constants
     use classes
+    use config, only: GlobalError, error_unsupported_params
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
 
     ! Running Vacuum Model (RVM), Sola group.
@@ -34,6 +36,7 @@
         real(dl) :: grhoc_rvm = 0._dl ! cached 8 pi G rho_c0 = State%grhoc (for rho_L(a))
     contains
     procedure :: ReadParams => TRunningVacuum_ReadParams
+    procedure :: Validate => TRunningVacuum_Validate
     procedure, nopass :: PythonClass => TRunningVacuum_PythonClass
     procedure, nopass :: SelfPointer => TRunningVacuum_SelfPointer
     procedure :: Init => TRunningVacuum_Init
@@ -44,6 +47,18 @@
     end type TRunningVacuum
 
     contains
+
+    subroutine TRunningVacuum_Validate(this, OK)
+    class(TRunningVacuum), intent(in) :: this
+    logical, intent(inout) :: OK
+
+    call this%TDarkEnergyModel%Validate(OK)
+    if (.not. ieee_is_finite(this%nu) .or. abs(this%nu) > 0.01_dl) then
+        OK = .false.
+        write(*,*) 'RunningVacuum nu must be finite and satisfy |nu|<=0.01.'
+    end if
+
+    end subroutine TRunningVacuum_Validate
 
     subroutine TRunningVacuum_ReadParams(this, Ini)
     use IniObjects
@@ -74,6 +89,11 @@
     use classes
     class(TRunningVacuum), intent(inout) :: this
     class(TCAMBdata), intent(in), target :: State
+
+    if (.not. ieee_is_finite(this%nu) .or. abs(this%nu) > 0.01_dl) then
+        call GlobalError('RunningVacuum nu must be finite and satisfy |nu|<=0.01.', error_unsupported_params)
+        return
+    end if
 
     ! Cache 8 pi G rho_c0 (= State%grhoc, set before DarkEnergy%Init) so the
     ! smooth-vacuum density rho_L(a) can add its CDM-tracking excess. grhoc is

@@ -25,6 +25,8 @@ class DarkMatterModel(F2003Class):
     _fields_ = (
         ("__is_standard_cdm", c_bool),
         ("__num_perturb_equations", c_int),
+        ("__num_dm_equations", c_int),
+        ("__has_background_pressure", c_bool),
         ("__has_cdm_velocity", c_bool),
         ("__num_dr_equations", c_int),
     )
@@ -324,11 +326,20 @@ class WarmDM(DarkMatterModel):
 @fortran_class
 class FuzzyDM(DarkMatterModel):
     """
-    Fuzzy/Ultralight Axion Dark Matter (ULDM).
+    Fuzzy/ultralight-axion dark matter with an exact KG-to-PH-EFA transition.
 
-    Ultra-light boson DM (m ~ 10^-22 eV) with astrophysically large
-    de Broglie wavelength. Effective fluid with scale-dependent sound speed
-    cs2(k,a) = k^2 / (4*m^2*a^2) producing a quantum Jeans scale.
+    The homogeneous scalar and its perturbations follow the quadratic
+    Klein--Gordon equations while the field is frozen and during the first
+    oscillations. All modes switch on the same ``m/H=match_ratio`` hypersurface
+    using the Passaglia--Hu phase-envelope mapping. A conservative C1 window
+    then blends exact stress-energy into the effective fluid.
+
+    The axion replaces a fraction of the existing total ``omch2`` budget; its
+    present density is fixed by log-space abundance shooting. The enforced
+    contract is ``1e-23 <= m_axion <= 1e-21`` eV, ``1e-3 <= f_axion <= 0.1``,
+    a cosmological-constant dark-energy background, and ``50 <= match_ratio <= 75``.
+    ``omega_axion_h2`` and ``f_axion`` are mutually exclusive. The separate
+    DarkEnergy-slot :class:`camb.dark_energy.FuzzyDMField` remains disabled.
 
     References: Hu+ 2000, Hlozek+ 2015, axionCAMB.
 
@@ -342,33 +353,52 @@ class FuzzyDM(DarkMatterModel):
         ("m_axion", c_double, "Axion mass [eV]"),
         ("omega_axion_h2", c_double, "Axion density Omega_a h^2"),
         ("f_axion", c_double, "Fraction of CDM that is axion"),
+        ("match_ratio", c_int, "KG-to-EFA matching threshold m/H"),
+        ("_m_conf", c_double, "Internal axion mass in inverse Mpc"),
+        ("_a_osc", c_double, "Internal oscillation scale factor"),
+        ("_a_match", c_double, "Internal KG-to-EFA matching scale factor"),
+        ("_a_exact_end", c_double, "Internal end of the conservative blend"),
     )
 
     _fortran_class_module_ = "FuzzyDM"
     _fortran_class_name_ = "TFuzzyDM"
 
-    def set_params(self, m_axion=1e-22, omega_axion_h2=0.0, f_axion=1.0):
+    def set_params(self, m_axion=1e-22, omega_axion_h2=0.0, f_axion=0.0, match_ratio=50):
         """
         Set fuzzy DM parameters.
 
         :param m_axion: axion mass [eV]
         :param omega_axion_h2: axion density (0 uses f_axion * omch2)
         :param f_axion: fraction of CDM that is ULDM
+        :param match_ratio: common KG-to-EFA switch threshold m/H (50--75)
+
+        Attributes prefixed by ``_`` are read-only numerical diagnostics set
+        by the Fortran initializer and must not be supplied by callers.
         """
         self.m_axion = m_axion
         self.omega_axion_h2 = omega_axion_h2
         self.f_axion = f_axion
+        self.match_ratio = match_ratio
         self.validate_params()
 
     def validate_params(self):
-        if self.m_axion <= 0:
-            from .baseconfig import CAMBError
+        import numpy as np
 
-            raise CAMBError("m_axion must be positive")
-        if self.f_axion < 0 or self.f_axion > 1:
-            from .baseconfig import CAMBError
+        from .baseconfig import CAMBError
 
-            raise CAMBError("f_axion must be in [0, 1]")
+        if not np.all(np.isfinite([self.m_axion, self.f_axion, self.omega_axion_h2])):
+            raise CAMBError("FuzzyDM parameters must be finite")
+        if self.f_axion < 0 or self.omega_axion_h2 < 0:
+            raise CAMBError("FuzzyDM abundances must be non-negative")
+        if self.f_axion > 0 and self.omega_axion_h2 > 0:
+            raise CAMBError("Specify only one of f_axion and omega_axion_h2")
+        active = self.f_axion > 0 or self.omega_axion_h2 > 0
+        if active and not 1e-23 <= self.m_axion <= 1e-21:
+            raise CAMBError("Active FuzzyDM requires 1e-23 <= m_axion/eV <= 1e-21")
+        if self.f_axion > 0 and not 1e-3 <= self.f_axion <= 0.1:
+            raise CAMBError("FuzzyDM f_axion must be in the supported guard range [1e-3, 0.1]")
+        if active and not 50 <= self.match_ratio <= 75:
+            raise CAMBError("FuzzyDM match_ratio must be in the supported range [50, 75]")
 
 
 @fortran_class

@@ -2,7 +2,9 @@ import os
 import pickle
 import platform
 import sys
+import tempfile
 import unittest
+from ctypes import byref, c_double, c_int
 
 import numpy as np
 
@@ -11,7 +13,7 @@ try:
 except ImportError:
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
     import camb
-from camb import bbn, correlations, dark_energy, initialpower, model
+from camb import bbn, correlations, dark_energy, dark_matter, initialpower, model
 from camb.baseconfig import CAMBError, CAMBParamRangeError, CAMBValueError
 
 fast = "ci fast" in os.getenv("GITHUB_ACTIONS", "")
@@ -581,6 +583,407 @@ class CambTest(unittest.TestCase):
             camb.CAMBparams().MG.set_lagramses_horndeski(mu0=0)
         with self.assertRaises(CAMBValueError):
             camb.CAMBparams().MG.set_lagramses_horndeski(mass_hmpc=-0.1)
+
+    def testGlobalStateLifecycle(self):
+        def sigma8(mnu=0.06):
+            pars = camb.CAMBparams()
+            pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.12, mnu=mnu)
+            pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+            pars.set_matter_power(redshifts=[0], kmax=1.0, silent=True)
+            return camb.get_results(pars).get_sigma8()[0]
+
+        camb.free_global_memory()
+        self.addCleanup(camb.free_global_memory)
+        baseline = sigma8()
+
+        tabulated = camb.CAMBparams()
+        tabulated.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.12, mnu=0.06)
+        tabulated.InitPower.set_params(As=2.1e-9, ns=0.965)
+        tabulated.set_matter_power(redshifts=[0], kmax=1.0, silent=True)
+        tabulated.MG.set_mu_a_table([0.1, 1.0], [1.2, 1.2])
+        modified = camb.get_results(tabulated).get_sigma8()[0]
+        self.assertGreater(modified, 1.1 * baseline)
+
+        # Every transition from a process-global table to a named MG model
+        # must discard that table, including a later return to model 0.
+        for set_model in (
+            lambda mg: mg.set_fR(1e-5),
+            lambda mg: mg.set_nDGP(H0rc=5),
+            lambda mg: mg.set_symmetron(),
+        ):
+            state = camb.CAMBparams()
+            state.MG.set_mu_a_table([0.1, 1.0], [1.2, 1.2])
+            set_model(state.MG)
+            np.testing.assert_allclose(sigma8(), baseline, rtol=2e-12)
+
+        state.MG.set_mu_a_table([0.1, 1.0], [1.2, 1.2])
+        state.MG.clear_MG_model()
+        np.testing.assert_allclose(sigma8(), baseline, rtol=2e-12)
+
+        state.MG.set_mu_a_table([0.1, 1.0], [1.2, 1.2])
+        camb.free_global_memory()
+        np.testing.assert_allclose(sigma8(), baseline, rtol=2e-12)
+
+        # A custom neutrino PSD and all derived thermal/perturbation caches
+        # must also be reset safely and repeatably in the same process.
+        q = np.linspace(0.05, 25.0, 160)
+        camb.CAMBparams().set_ncdm_psd(0, q, np.exp(-q / 2.0))
+        custom_psd = sigma8(mnu=0.2)
+        camb.free_global_memory()
+        standard_psd = sigma8(mnu=0.2)
+        repeated = sigma8(mnu=0.2)
+        self.assertGreater(abs(custom_psd - standard_psd), 1e-3)
+        np.testing.assert_allclose(repeated, standard_psd, rtol=2e-12)
+
+    def testInteractingDEValidation(self):
+        for interaction_type in (2, 3):
+            with self.assertRaisesRegex(CAMBError, "supports only interaction_type=1"):
+                dark_energy.InteractingDE().set_params(interaction_type=interaction_type)
+
+        invalid_equations_of_state = [
+            dict(w=-1.1, wa=0),
+            dict(w=-0.9, wa=-0.2),
+            dict(w=-1 + 1e-6, wa=0),
+        ]
+        for params in invalid_equations_of_state:
+            with self.assertRaisesRegex(CAMBError, "does not support phantom or w=-1 crossing"):
+                dark_energy.InteractingDE().set_params(**params)
+        with self.assertRaisesRegex(CAMBError, "w>0 at high redshift"):
+            dark_energy.InteractingDE().set_params(w=-0.2, wa=0.3)
+
+        with self.assertRaisesRegex(CAMBError, "must be finite"):
+            dark_energy.InteractingDE().set_params(xi_ide=np.nan)
+        with self.assertRaisesRegex(CAMBError, "finite and non-negative"):
+            dark_energy.InteractingDE().set_params(cs2_ide=-1)
+
+        unsafe_a = np.array([0.1, 0.2, 0.4, 0.7, 1.0])
+        unsafe_w = np.array([-0.8133943039, -0.9960815050, -0.8069698378, -0.9663217592, -0.8320934403])
+        with self.assertRaisesRegex(CAMBError, "between nodes"):
+            dark_energy.InteractingDE().set_w_a_table(unsafe_a, unsafe_w)
+        bad_endpoint = unsafe_a.copy()
+        bad_endpoint[-1] = 1 + 1.0005e-5
+        with self.assertRaisesRegex(ValueError, "must end at a=1"):
+            dark_energy.InteractingDE().set_w_a_table(bad_endpoint, np.full(5, -0.9))
+
+        stateful = dark_energy.InteractingDE()
+        stateful.set_w_a_table(unsafe_a, np.full(5, -0.9))
+        self.assertTrue(stateful.use_tabulated_w)
+        stateful.set_params(w=-0.9, wa=0, xi_ide=0.03)
+        self.assertFalse(stateful.use_tabulated_w)
+
+        pars = camb.CAMBparams()
+        pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.12, mnu=0)
+        pars.DarkEnergy = dark_energy.InteractingDE()
+        pars.DarkEnergy.set_params(w=-1, wa=0, xi_ide=0.03, interaction_type=1)
+        self.assertTrue(np.isfinite(camb.get_background(pars, no_thermo=True).cosmomc_theta()))
+
+        for interaction_type in (2, 3):
+            bypassed = dark_energy.InteractingDE()
+            bypassed.set_params(w=-0.9, wa=0, xi_ide=0.03, interaction_type=1)
+            bypassed.f_SetIDEParams(
+                byref(c_double(0.03)), byref(c_int(interaction_type)), byref(c_double(1.0))
+            )
+            pars.DarkEnergy = bypassed
+            self.assertFalse(pars.validate())
+            with self.assertRaisesRegex(CAMBError, "supports only interaction_type=1"):
+                camb.get_background(pars, no_thermo=True)
+
+        bypassed = dark_energy.InteractingDE()
+        bypassed.set_params(w=-0.9, wa=0, xi_ide=0.03, interaction_type=1)
+        bypassed.w = -1.1
+        pars.DarkEnergy = bypassed
+        self.assertFalse(pars.validate())
+        with self.assertRaisesRegex(CAMBError, "does not support phantom or w=-1 crossing"):
+            camb.get_background(pars, no_thermo=True)
+
+        direct_constructor = dark_energy.InteractingDE(w=-1.1)
+        pars.DarkEnergy = direct_constructor
+        with self.assertRaisesRegex(CAMBError, "does not support phantom or w=-1 crossing"):
+            camb.get_background(pars, no_thermo=True)
+
+        bypassed = dark_energy.InteractingDE()
+        bypassed.set_params(w=-0.9, wa=0, xi_ide=0.03)
+        bypassed.f_SetWTable(unsafe_a, unsafe_w, byref(c_int(len(unsafe_a))))
+        pars.DarkEnergy = bypassed
+        with self.assertRaisesRegex(CAMBError, "nodes and between nodes"):
+            camb.get_background(pars, no_thermo=True)
+
+        with open(os.path.join(os.path.dirname(__file__), "..", "..", "inifiles", "params.ini")) as source:
+            ini_base = source.read().replace("dark_energy_model  = fluid", "dark_energy_model  = InteractingDE")
+        from camb.camb import validate_ini_file
+
+        def validate_ide_ini(interaction_type=1, w=-1.0, wa=0.0, error_pattern=None, run=False):
+            ini_text = ini_base.replace("w              = -1", f"w              = {w}")
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".ini") as ini_file:
+                ini_file.write(
+                    ini_text
+                    + f"\nxi_ide = 0.03\ncs2_ide = 1\ninteraction_type = {interaction_type}\nwa = {wa}\n"
+                )
+                ini_file.flush()
+                if error_pattern:
+                    with self.assertRaisesRegex(CAMBValueError, error_pattern):
+                        validate_ini_file(ini_file.name)
+                    return
+                self.assertTrue(validate_ini_file(ini_file.name))
+                if run:
+                    ini_pars = camb.read_ini(ini_file.name)
+                    self.assertIsInstance(ini_pars.DarkEnergy, dark_energy.InteractingDE)
+                    self.assertTrue(np.isfinite(camb.get_background(ini_pars, no_thermo=True).cosmomc_theta()))
+
+        for interaction_type in (2, 3):
+            validate_ide_ini(
+                interaction_type=interaction_type,
+                error_pattern="supports only interaction_type=1",
+            )
+        validate_ide_ini(
+            w=-1.1,
+            error_pattern="does not support phantom or w=-1 crossing",
+        )
+        validate_ide_ini(
+            w=-0.9,
+            wa=-0.2,
+            error_pattern="does not support phantom or w=-1 crossing",
+        )
+        validate_ide_ini(w=-0.9, run=True)
+
+    def testNonstandardDEValidationContracts(self):
+        with self.assertRaisesRegex(CAMBError, "Active FuzzyDMField configurations are disabled"):
+            dark_energy.FuzzyDMField().set_params(f_axion=0.05)
+        with self.assertRaisesRegex(CAMBError, "Active FuzzyDMField configurations are disabled"):
+            dark_energy.FuzzyDMField().set_params(omega_axion_h2=0.005)
+
+        pars = camb.CAMBparams()
+        pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.12)
+        for field, value in (("f_axion", 0.05), ("omega_axion_h2", 0.005)):
+            fuzzy_bypass = dark_energy.FuzzyDMField()
+            setattr(fuzzy_bypass, field, value)
+            pars.DarkEnergy = fuzzy_bypass
+            self.assertFalse(pars.validate())
+            with self.assertRaises(CAMBError):
+                camb.get_background(pars, no_thermo=True)
+            with self.assertRaises(CAMBError):
+                camb.get_results(pars)
+
+        for params in (
+            dict(w=-0.95),
+            dict(wa=0.1),
+            dict(alpha_K=0.1),
+            dict(alpha_B=0.1),
+            dict(alpha_M=0.1),
+            dict(alpha_T=0.1),
+            dict(M_star_ini=1.1),
+        ):
+            with self.assertRaisesRegex(CAMBError, "only the exact LambdaCDM null configuration"):
+                dark_energy.HorndeskiDE().set_params(**params)
+
+        for values in (
+            (0.1, 0.0, 0.0, 0.0, 1.0),
+            (0.0, 0.1, 0.0, 0.0, 1.0),
+            (0.0, 0.0, 0.1, 0.0, 1.0),
+            (0.0, 0.0, 0.0, 0.1, 1.0),
+            (0.0, 0.0, 0.0, 0.0, 1.1),
+        ):
+            horndeski_bypass = dark_energy.HorndeskiDE()
+            horndeski_bypass.f_SetHorndeskiParams(*(byref(c_double(value)) for value in values))
+            pars.DarkEnergy = horndeski_bypass
+            self.assertFalse(pars.validate())
+            with self.assertRaises(CAMBError):
+                camb.get_background(pars, no_thermo=True)
+            with self.assertRaises(CAMBError):
+                camb.get_results(pars)
+
+        with self.assertRaisesRegex(CAMBError, "validated near-Lambda range"):
+            dark_energy.KEssence().set_params(x0=0.5001)
+        for beta in (-0.01, 0.11):
+            with self.assertRaisesRegex(CAMBError, "validated range"):
+                dark_energy.CoupledQuintessence().set_params(beta=beta)
+
+        def assert_invalid_direct(model_instance):
+            pars.DarkEnergy = model_instance
+            self.assertFalse(pars.validate())
+            with self.assertRaises(CAMBError):
+                camb.get_background(pars, no_thermo=True)
+            with self.assertRaises(CAMBError):
+                camb.get_results(pars)
+
+        for beta in (-0.01, 0.11, np.nan):
+            coupled_bypass = dark_energy.CoupledQuintessence()
+            coupled_bypass.beta = beta
+            assert_invalid_direct(coupled_bypass)
+
+        tracker_invalid_fields = (
+            dict(pot_type=3),
+            dict(ic_mode=2),
+            dict(ic_mode=1, pot_type=2),
+            dict(alpha=np.nan),
+            dict(lam=0.0),
+            dict(phi_ini=0.0),
+        )
+        for model_class in (dark_energy.TrackerQuintessence, dark_energy.CoupledQuintessence):
+            for invalid_fields in tracker_invalid_fields:
+                tracker_bypass = model_class()
+                for field, value in invalid_fields.items():
+                    setattr(tracker_bypass, field, value)
+                assert_invalid_direct(tracker_bypass)
+
+        def null_observables(dark_energy_model=None, dark_matter_model=None):
+            model_pars = camb.CAMBparams()
+            model_pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.12, mnu=0)
+            model_pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+            model_pars.set_for_lmax(200)
+            model_pars.set_matter_power(redshifts=[0], kmax=1.0, silent=True)
+            if dark_energy_model is not None:
+                model_pars.DarkEnergy = dark_energy_model
+            if dark_matter_model is not None:
+                model_pars.DarkMatter = dark_matter_model
+            results = camb.get_results(model_pars)
+            _, _, power = results.get_matter_power_spectrum(minkh=1e-4, maxkh=1.0, npoints=80)
+            return (
+                results.hubble_parameter(np.array([0.0, 1.0, 10.0, 100.0])),
+                power,
+                results.get_unlensed_scalar_cls(raw_cl=True),
+                results.get_sigma8(),
+            )
+
+        baseline = null_observables()
+
+        null_fuzzy_dm = dark_matter.FuzzyDM()
+        null_fuzzy_dm.set_params()
+        for actual, expected in zip(null_observables(dark_matter_model=null_fuzzy_dm), baseline):
+            self.assertTrue(np.array_equal(actual, expected))
+
+        null_fuzzy = dark_energy.FuzzyDMField()
+        null_fuzzy.set_params()
+        for actual, expected in zip(null_observables(null_fuzzy), baseline):
+            self.assertTrue(np.array_equal(actual, expected))
+
+        null_horndeski = dark_energy.HorndeskiDE()
+        null_horndeski.set_params()
+        for actual, expected in zip(null_observables(null_horndeski), baseline):
+            self.assertTrue(np.array_equal(actual, expected))
+
+    def testFuzzyDMTransferNonuIncludesAxion(self):
+        for match_ratio in (49, 76):
+            with self.assertRaisesRegex(CAMBError, "match_ratio"):
+                dark_matter.FuzzyDM().set_params(
+                    m_axion=1e-22, f_axion=0.05, match_ratio=match_ratio
+                )
+
+        pars = camb.CAMBparams()
+        pars.set_cosmology(H0=67.36, ombh2=0.02237, omch2=0.12, mnu=0, nnu=3.044)
+        pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+        pars.WantTransfer = True
+        pars.set_matter_power(redshifts=[0], kmax=10, silent=True)
+        pars.DarkMatter = dark_matter.FuzzyDM()
+        pars.DarkMatter.set_params(m_axion=1e-23, f_axion=0.05)
+
+        results = camb.get_results(pars)
+        transfer = results.get_matter_transfer_data()
+        delta_b = transfer.transfer_z("delta_baryon")
+        delta_c = transfer.transfer_z("delta_cdm")
+        delta_a = transfer.transfer_z("delta_dm_dr")
+        delta_nonu = transfer.transfer_z("delta_nonu")
+        expected = (
+            pars.ombh2 * delta_b
+            + pars.omch2 * (0.95 * delta_c + 0.05 * delta_a)
+        ) / (pars.ombh2 + pars.omch2)
+        cdm_only = (pars.ombh2 * delta_b + pars.omch2 * delta_c) / (pars.ombh2 + pars.omch2)
+
+        np.testing.assert_allclose(delta_nonu, expected, rtol=3e-6, atol=0)
+        self.assertGreater(np.max(np.abs(cdm_only / expected - 1)), 1e-3)
+        self.assertTrue(np.all(np.isfinite(results.get_unlensed_scalar_cls(raw_cl=True))))
+
+    def testFuzzyDMExactBackgroundContracts(self):
+        def fuzzy_background(**dm_params):
+            pars = camb.CAMBparams()
+            pars.set_cosmology(H0=67.36, ombh2=0.02237, omch2=0.12, mnu=0, nnu=3.044)
+            pars.DarkMatter = dark_matter.FuzzyDM()
+            pars.DarkMatter.set_params(**dm_params)
+            return pars, camb.get_background(pars, no_thermo=True)
+
+        for abundance in (dict(f_axion=0.05), dict(omega_axion_h2=0.006)):
+            pars, results = fuzzy_background(m_axion=1e-22, match_ratio=50, **abundance)
+            dm = results.Params.DarkMatter
+            self.assertGreater(dm._a_match, dm._a_osc)
+            self.assertGreater(dm._a_exact_end, dm._a_match)
+
+            match_z = 1 / dm._a_match - 1
+            match_h = results.hubble_parameter(match_z) / 299792.458
+            self.assertLess(abs(dm._m_conf / match_h / dm.match_ratio - 1), 1e-8)
+
+            sample_a = np.unique(
+                np.concatenate(
+                    [
+                        np.geomspace(1e-10, 1, 80),
+                        dm._a_match * np.array([1 - 1e-6, 1, 1 + 1e-6]),
+                        dm._a_exact_end * np.array([1 - 1e-6, 1, 1 + 1e-6]),
+                    ]
+                )
+            )
+            density = results.get_background_densities(sample_a)
+            self.assertTrue(all(np.all(np.isfinite(value)) for value in density.values()))
+            self.assertTrue(np.all(density["cdm"] > 0))
+            self.assertAlmostEqual(
+                density["cdm"][-1] / density["tot"][-1],
+                results.get_Omega("cdm"),
+                delta=2e-10,
+            )
+
+            for center in (dm._a_match, dm._a_exact_end):
+                local = results.get_background_densities(
+                    center * np.array([1 - 1e-6, 1, 1 + 1e-6]), "cdm"
+                )["cdm"]
+                self.assertLess(abs(local[1] / (0.5 * (local[0] + local[2])) - 1), 1e-8)
+
+                step = 1e-4
+                stencil_a = center * np.exp(step * np.arange(-2, 3))
+                log_rho = np.log(results.get_background_densities(stencil_a, "cdm")["cdm"])
+                left_slope = (3 * log_rho[2] - 4 * log_rho[1] + log_rho[0]) / (2 * step)
+                right_slope = (-3 * log_rho[2] + 4 * log_rho[3] - log_rho[4]) / (2 * step)
+                self.assertLess(abs(left_slope - right_slope), 1e-6)
+
+        for mass, match_ratio in ((1e-23, 75), (1e-21, 50)):
+            pars = camb.CAMBparams()
+            pars.set_cosmology(H0=67.36, ombh2=0.02237, omch2=0.12, mnu=0, nnu=3.044)
+            pars.InitPower.set_params(As=2.1e-9, ns=0.965)
+            pars.WantCls = False
+            pars.set_matter_power(redshifts=[0], kmax=2, silent=True)
+            pars.DarkMatter = dark_matter.FuzzyDM()
+            pars.DarkMatter.set_params(m_axion=mass, f_axion=0.05, match_ratio=match_ratio)
+            results = camb.get_results(pars)
+            _, _, power = results.get_matter_power_spectrum(minkh=1e-3, maxkh=2, npoints=60)
+            self.assertTrue(np.all(np.isfinite(power)))
+            self.assertTrue(np.all(power > 0))
+            dm = results.Params.DarkMatter
+            switch_a = dm._a_match * np.exp(np.array([-1e-5, 0, 1e-5]))
+            switch_z = 1 / switch_a - 1
+            evolution = results.get_redshift_evolution(
+                np.array([0.1]), switch_z, ["delta_dm_dr", "delta_cdm", "delta_tot"]
+            )
+            self.assertTrue(np.all(np.isfinite(evolution)))
+
+        invalid_models = []
+        for fields in (
+            dict(m_axion=np.nan, f_axion=0.05),
+            dict(m_axion=1e-22, f_axion=0.05, match_ratio=100),
+            dict(m_axion=1e-22, f_axion=0.05, omega_axion_h2=0.006),
+        ):
+            dm = dark_matter.FuzzyDM()
+            for field, value in fields.items():
+                setattr(dm, field, value)
+            invalid_models.append(dm)
+        for dm in invalid_models:
+            pars = camb.CAMBparams()
+            pars.set_cosmology(H0=67.36, ombh2=0.02237, omch2=0.12)
+            pars.DarkMatter = dm
+            self.assertFalse(pars.validate())
+            with self.assertRaises(CAMBError):
+                camb.get_background(pars, no_thermo=True)
+
+        pars, _ = fuzzy_background(m_axion=1e-22, f_axion=0.05)
+        pars.set_dark_energy(w=-0.9)
+        with self.assertRaisesRegex(CAMBError, "cosmological-constant"):
+            camb.get_background(pars, no_thermo=True)
 
     def testSave(self):
         pars = camb.set_params(H0=67.5, ombh2=0.022, omch2=0.122, As=2e-9, ns=0.95, redshifts=[0.4, 31.5], kmax=0.1)

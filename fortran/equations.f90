@@ -34,6 +34,7 @@
     use DarkMatterInteraction
     use MuSigmaMG
     use Transfer
+    use config, only: GlobalError, error_unsupported_params
     implicit none
     public
 
@@ -85,6 +86,7 @@
         integer dm_ix  !Index of interacting DM density perturbation (DM-DR)
         integer dr_ix  !Index of dark radiation hierarchy (DM-DR)
         integer vc_ix  !Index of CDM velocity (DM-baryon or DM-DR)
+        real(dl) :: DMSwitchTime = 0._dl
 
         integer q_ix !index into q_evolve array that gives the value q
         logical TransferOnly
@@ -256,7 +258,7 @@
     recursive subroutine GaugeInterface_EvolveScal(EV,tau,y,tauend,tol1,ind,c,w)
     use Recombination, only : CB1
     type(EvolutionVars) EV, EVout
-    real(dl) c(24),w(EV%nvar,9), y(EV%nvar), yout(EV%nvar), tol1, tau, tauend
+    real(dl) c(24),w(EV%nvar,9), y(EV%nvar), yout(EV%nvar), yprime(EV%nvar), tol1, tau, tauend
     integer ind, nu_i
     real(dl) cs2, opacity, dopacity
     real(dl) tau_switch_ktau, tau_switch_nu_massless, tau_switch_nu_massive, next_switch
@@ -264,7 +266,7 @@
     real(dl) tau_switch_dr_ufa
     real(dl) noSwitch, smallTime
     !Sources
-    real(dl) tau_switch_saha, Delta_TM, xe,a,tau_switch_evolve_TM
+    real(dl) tau_switch_saha, Delta_TM, xe,a,tau_switch_evolve_TM, tau_switch_dm, z
 
     noSwitch= State%tau0+1
     smallTime =  min(tau, 1/EV%k_buf)/100
@@ -283,6 +285,8 @@
     if (CP%Evolve_delta_xe .and. EV%saha)  tau_switch_saha = EV%ThermoData%recombination_saha_tau
     tau_switch_evolve_TM=noSwitch
     if (EV%Evolve_baryon_cs .and. .not. EV%Evolve_tm) tau_switch_evolve_TM = EV%ThermoData%recombination_Tgas_tau
+    tau_switch_dm = noSwitch
+    if (EV%DMSwitchTime > 0._dl) tau_switch_dm = EV%DMSwitchTime
 
     !Evolve equations from tau to tauend, performing switches in equations if necessary.
 
@@ -322,7 +326,7 @@
 
     next_switch = min(tau_switch_ktau, tau_switch_nu_massless,EV%TightSwitchoffTime, tau_switch_nu_massive, &
         tau_switch_no_nu_multpoles, tau_switch_no_phot_multpoles, tau_switch_nu_nonrel, noSwitch, &
-        tau_switch_saha, tau_switch_evolve_TM, tau_switch_dr_ufa)
+        tau_switch_saha, tau_switch_evolve_TM, tau_switch_dr_ufa, tau_switch_dm)
 
     if (next_switch < tauend) then
         if (next_switch > tau+smallTime) then
@@ -450,6 +454,17 @@
             y=yout
             EV=EVout
             y(EV%Tg_ix) =y(EV%g_ix)/4 ! assume delta_TM = delta_T_gamma
+        else if (next_switch==tau_switch_dm) then
+            call derivs(EV,EV%ScalEqsToPropagate,tau,y,yprime)
+            EVout%DMSwitchTime = noSwitch
+            ind=1
+            call SetupScalarArrayIndices(EVout)
+            call CopyScalarVariableArray(y,yout, EV, EVout)
+            y=yout
+            EV=EVout
+            call EV%ThermoData%Values(tau,a, cs2,opacity)
+            z = -yprime(ix_clxc)/EV%k_buf
+            call CP%DarkMatter%Switch(EV%dm_ix, a, EV%k_buf, z, y)
         end if
 
         call GaugeInterface_EvolveScal(EV,tau,y,tauend,tol1,ind,c,w)
@@ -625,6 +640,12 @@
     if (allocated(CP%DarkMatter)) then
         if (.not. CP%DarkMatter%is_standard_cdm) then
             EV%is_standard_cdm = .false.
+            ! Contiguous model-specific DM equations (e.g. exact KG + EFA).
+            if (CP%DarkMatter%num_dm_equations > 0) then
+                EV%dm_ix = neq + 1
+                neq = neq + CP%DarkMatter%num_dm_equations
+                maxeq = maxeq + CP%DarkMatter%num_dm_equations
+            end if
             ! CDM velocity (for DM-baryon or DM-DR)
             if (CP%DarkMatter%has_cdm_velocity) then
                 EV%vc_ix = neq + 1
@@ -633,6 +654,11 @@
             end if
             ! Interacting DM density perturbation (for DM-DR: separate from standard CDM)
             if (CP%DarkMatter%num_dr_equations > 0) then
+                if (CP%DarkMatter%num_dm_equations > 0) then
+                    call GlobalError('DarkMatter cannot combine model-specific DM equations with a DR hierarchy', &
+                        error_unsupported_params)
+                    return
+                end if
                 EV%dm_ix = neq + 1
                 neq = neq + 1  ! delta_dmdr
                 maxeq = maxeq + 1
@@ -717,7 +743,14 @@
     ! DarkMatter interactions
     if (.not. EV%is_standard_cdm .and. .not. EVout%is_standard_cdm) then
         if (EV%vc_ix > 0 .and. EVout%vc_ix > 0) yout(EVout%vc_ix) = y(EV%vc_ix)
-        if (EV%dm_ix > 0 .and. EVout%dm_ix > 0) yout(EVout%dm_ix) = y(EV%dm_ix)
+        if (EV%dm_ix > 0 .and. EVout%dm_ix > 0) then
+            if (CP%DarkMatter%num_dm_equations > 0) then
+                yout(EVout%dm_ix:EVout%dm_ix + CP%DarkMatter%num_dm_equations - 1) = &
+                    y(EV%dm_ix:EV%dm_ix + CP%DarkMatter%num_dm_equations - 1)
+            else
+                yout(EVout%dm_ix) = y(EV%dm_ix)
+            end if
+        end if
         if (EV%dr_ix > 0 .and. EVout%dr_ix > 0 .and. allocated(CP%DarkMatter)) then
             if (EV%high_ktau_dr_approx .or. EVout%high_ktau_dr_approx) then
                 lmax = 2  ! UFA: copy only F_0, F_1, F_2
@@ -1894,7 +1927,7 @@
     real(dl) Rp15,tau,x,x2,x3,om,omtau, &
         Rc,Rb,Rv,Rg,grhonu,chi
     real(dl) k,k2
-    real(dl) a,a2, iqg, rhomass,a_massive, ep
+    real(dl) a,a2, iqg, rhomass,a_massive, ep, a_dm_switch
     integer l,i, nu_i, j, ind
     integer, parameter :: i_clxg=1,i_clxr=2,i_clxc=3, i_clxb=4, &
         i_qg=5,i_qr=6,i_vb=7,i_pir=8, i_eta=9, i_aj3r=10,i_clxde=11,i_vde=12, i_vc_cq=13
@@ -1906,7 +1939,7 @@
     nullify(EV%CustomSources)
 
     EV%is_cosmological_constant = State%CP%DarkEnergy%is_cosmological_constant
-    if (allocated(State%CP%DarkMatter)) then
+    if (allocated(State%CP%DarkMatter) .and. .not. State%CP%DarkMatter%is_standard_cdm) then
         EV%is_standard_cdm = State%CP%DarkMatter%is_standard_cdm
     else
         EV%is_standard_cdm = .true.
@@ -1950,6 +1983,16 @@
     end if
     if (second_order_tightcoupling) ep=ep*2
     EV%TightSwitchoffTime = min(EV%ThermoData%tight_tau, EV%ThermoData%OpacityToTime(EV%k_buf/ep))
+
+    ! Stop every k mode on the same physical KG--EFA hypersurface. Do not use
+    ! the first thermo-grid sample after the condition, which is mode-common
+    ! but only grid accurate.
+    EV%DMSwitchTime = 0._dl
+    if (allocated(State%CP%DarkMatter)) then
+        a_dm_switch = State%CP%DarkMatter%ScalarSwitchScaleFactor()
+        if (a_dm_switch > 0._dl .and. a_dm_switch < 1._dl) &
+            EV%DMSwitchTime = State%TimeOfz(1._dl/a_dm_switch-1._dl, 1e-7_dl)
+    end if
 
     y=0
 
@@ -2284,6 +2327,7 @@
     use Recombination, only : CB1
     use DMNeutrino, only: TDMNeutrinoScattering
     use DMPhoton, only: TDMPhotonScattering
+    use FuzzyDM, only: TFuzzyDM
     use InteractingDE, only: TInteractingDE, ide_Q_H_rho_de, ide_Q_H_rho_c, ide_Q_H_rho_tot
     use DarkEnergyRunningVacuum, only: TRunningVacuum
     use HorndeskiDE, only: THorndeskiDE
@@ -2324,10 +2368,15 @@
     real(dl) ddopacity, visibility, dvisibility, ddvisibility, exptau, lenswindow
     real(dl) ISW, quadrupole_source, doppler, monopole_source, tau0, ang_dist
     real(dl) dgrho_de, dgq_de, cs2_de
+    real(dl) dgrho_dm, dgq_dm, dgrho_nonu_dm, gpres_dm
     real(dl) mu_dot_gamma, opacity_total, R_dm_ph
 
     k=EV%k_buf
     k2=EV%k2_buf
+    dgrho_dm = 0._dl
+    dgq_dm = 0._dl
+    dgrho_nonu_dm = 0._dl
+    gpres_dm = 0._dl
 
     !  Get background scale factor, sound speed and ionisation fraction.
     if (EV%TightCoupling) then
@@ -2352,9 +2401,14 @@
     grhor_t=State%grhornomass/a2
     grhog_t=State%grhog/a2
 
-    ! Allow DarkMatter model to modify CDM background density (e.g. DecayingDM)
-    if (allocated(State%CP%DarkMatter)) then
-        call State%CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t)
+    ! Allow an active DarkMatter model to modify the CDM background density.
+    ! A null model takes the exact standard-CDM arithmetic path.
+    if (allocated(State%CP%DarkMatter) .and. .not. State%CP%DarkMatter%is_standard_cdm) then
+        if (State%CP%DarkMatter%has_background_pressure) then
+            call State%CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t, gpres_dm)
+        else
+            call State%CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t)
+        end if
     end if
     ! Interacting DE (type 1): CDM background gains the dark-sector energy exchange
     ! (zero for non-interacting DE, so LCDM/xi=0 is unchanged and bit-exact).
@@ -2383,6 +2437,9 @@
     grho_matter=grhonu_t+grhob_t+grhoc_t
     grho = grho_matter+grhor_t+grhog_t+grhov_t
     gpres_noDE = gpres_nu + (grhor_t + grhog_t)/3
+    if (allocated(State%CP%DarkMatter)) then
+        if (State%CP%DarkMatter%has_background_pressure) gpres_noDE = gpres_noDE + gpres_dm
+    end if
 
     ! Add DM-DR background densities
     if (.not. EV%is_standard_cdm) then
@@ -2461,15 +2518,18 @@
 
     ! DM-DR perturbation contributions to total density and velocity
     if (.not. EV%is_standard_cdm .and. allocated(CP%DarkMatter)) then
-        block
-            real(dl) :: dgrho_dm, dgq_dm
-            call CP%DarkMatter%PerturbedStressEnergy(dgrho_dm, dgq_dm, &
-                a, dgq, dgrho, grho, grhoc_t, adotoa, k, ay, ayprime, &
-                EV%dm_ix, EV%dr_ix, EV%vc_ix)
-            dgrho = dgrho + dgrho_dm
-            dgq = dgq + dgq_dm
-            dgrho_matter = dgrho_matter + dgrho_dm
-        end block
+        call CP%DarkMatter%PerturbedStressEnergy(dgrho_dm, dgq_dm, &
+            a, dgq, dgrho, grho, grhoc_t, adotoa, k, ay, ayprime, &
+            EV%dm_ix, EV%dr_ix, EV%vc_ix)
+        dgrho = dgrho + dgrho_dm
+        dgq = dgq + dgq_dm
+        dgrho_matter = dgrho_matter + dgrho_dm
+        ! FuzzyDM replaces part of the existing CDM slot, so its density
+        ! correction belongs in the public non-neutrino matter transfer.
+        select type(DM => CP%DarkMatter)
+        type is (TFuzzyDM)
+            dgrho_nonu_dm = dgrho_dm
+        end select
         ! Add CDM velocity contribution if DM-baryon scattering is active
         if (EV%vc_ix > 0 .and. CP%DarkMatter%num_dr_equations == 0) then
             ! For DM-baryon (no DR), CDM velocity contributes to dgq
@@ -3148,7 +3208,8 @@
             EV%OutputTransfer(Transfer_r) = clxr
             EV%OutputTransfer(Transfer_nu) = clxnu
             EV%OutputTransfer(Transfer_tot) =  dgrho_matter/grho_matter !includes neutrinos
-            EV%OutputTransfer(Transfer_nonu) = (grhob_t*clxb+grhoc_t*clxc)/(grhob_t + grhoc_t)
+            EV%OutputTransfer(Transfer_nonu) = &
+                (grhob_t*clxb + grhoc_t*clxc + dgrho_nonu_dm)/(grhob_t + grhoc_t)
             EV%OutputTransfer(Transfer_tot_de) =  dgrho/grho_matter
             !Transfer_Weyl is k^2Phi, where Phi is the Weyl potential
             EV%OutputTransfer(Transfer_Weyl) = k2*phi
@@ -3157,7 +3218,14 @@
             EV%OutputTransfer(Transfer_vel_baryon_cdm) = vb
             ! DM-DR transfer functions
             if (.not. EV%is_standard_cdm .and. EV%dm_ix > 0) then
-                EV%OutputTransfer(Transfer_dm_dr) = ay(EV%dm_ix)
+                select type(DM => CP%DarkMatter)
+                type is (TFuzzyDM)
+                    ! Reuse the public interacting-DM transfer slot for the
+                    ! post-match axion EFA density contrast.
+                    EV%OutputTransfer(Transfer_dm_dr) = ay(EV%dm_ix+2)
+                class default
+                    EV%OutputTransfer(Transfer_dm_dr) = ay(EV%dm_ix)
+                end select
             else
                 EV%OutputTransfer(Transfer_dm_dr) = 0
             end if
@@ -3286,7 +3354,7 @@
     real(dl) sigma, qg,pig, qr, vb, rhoq, vbdot, photbar, pb43
     real(dl) k,k2,a,a2, adotdota
     real(dl) pir,adotoa
-    real(dl) w_dark_energy_t
+    real(dl) w_dark_energy_t, gpres_dm
 
     k2=EV%k2_buf
     k=EV%k_buf
@@ -3324,15 +3392,20 @@
     grhoc_t=State%grhoc/a
     grhor_t=State%grhornomass/a2
     grhog_t=State%grhog/a2
-    if (allocated(CP%DarkMatter)) then
-        call CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t)
+    gpres_dm = 0._dl
+    if (allocated(CP%DarkMatter) .and. .not. CP%DarkMatter%is_standard_cdm) then
+        if (CP%DarkMatter%has_background_pressure) then
+            call CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t, gpres_dm)
+        else
+            call CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t)
+        end if
     end if
     ! Interacting DE (type 1): CDM background gains the dark-sector energy exchange
     grhoc_t = grhoc_t + CP%DarkEnergy%CDM_BackgroundCorrection(State%grhoc, State%grhov, a)
     call CP%DarkEnergy%BackgroundDensityAndPressure(State%grhov, a, grhov_t, w_dark_energy_t)
 
     grho=grhob_t+grhoc_t+grhor_t+grhog_t+grhov_t
-    gpres=(grhog_t+grhor_t)/3._dl+grhov_t*w_dark_energy_t
+    gpres=(grhog_t+grhor_t)/3._dl+grhov_t*w_dark_energy_t+gpres_dm
 
     adotoa=sqrt(grho/3._dl)
     adotdota=(adotoa*adotoa-gpres)/2

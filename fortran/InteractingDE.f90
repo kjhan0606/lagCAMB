@@ -3,15 +3,17 @@
     use results
     use constants
     use classes
+    use config, only: GlobalError, error_unsupported_params
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
 
     ! Interacting Dark Energy (IDE) model
     ! DM-DE energy-momentum exchange: Q_mu
     ! Background: rho_c' + 3H*rho_c = Q, rho_de' + 3(1+w)H*rho_de = -Q
-    ! Interaction kernels:
+    ! Science-supported interaction kernel:
     !   type 1: Q = xi * H * rho_de
-    !   type 2: Q = xi * H * rho_c
-    !   type 3: Q = xi * H * (rho_c + rho_de)
+    ! Types 2 and 3 remain as unreachable implementation scaffolding until
+    ! their background and perturbation systems are completed consistently.
     !
     ! Perturbations follow the covariant approach of Valiviita+ 2008
     ! In the CDM rest frame, Q^mu = (Q, 0) gives:
@@ -26,10 +28,11 @@
     integer, parameter :: ide_Q_H_rho_de = 1   ! Q = xi*H*rho_de
     integer, parameter :: ide_Q_H_rho_c = 2    ! Q = xi*H*rho_c
     integer, parameter :: ide_Q_H_rho_tot = 3  ! Q = xi*H*(rho_c+rho_de)
+    real(dl), parameter :: ide_w_safe_epsilon = 1.e-6_dl
 
     type, extends(TDarkEnergyEqnOfState) :: TInteractingDE
         real(dl) :: xi_ide = 0._dl        ! coupling strength (dimensionless)
-        integer  :: interaction_type = 1   ! which Q kernel (1,2,3)
+        integer  :: interaction_type = 1   ! supported value is 1
         real(dl) :: cs2_ide = 1._dl       ! DE rest-frame sound speed squared
         ! Cached quantities
         real(dl) :: grhoc_init = 0._dl    ! initial CDM density for modified evolution
@@ -41,6 +44,7 @@
         real(dl) :: ia_tab(4096)  = 0._dl  ! I(a) on that grid
     contains
     procedure :: ReadParams => TInteractingDE_ReadParams
+    procedure :: Validate => TInteractingDE_Validate
     procedure, nopass :: PythonClass => TInteractingDE_PythonClass
     procedure, nopass :: SelfPointer => TInteractingDE_SelfPointer
     procedure :: Init => TInteractingDE_Init
@@ -67,15 +71,144 @@
 
     end subroutine TInteractingDE_SetIDEParams
 
+    pure function TInteractingDE_SplineValue(y0, y1, m0, m1, width, t) result(value)
+    real(dl), intent(in) :: y0, y1, m0, m1, width, t
+    real(dl) :: value, omt
+
+    omt = 1._dl - t
+    value = omt*y0 + t*y1 + width**2 * &
+        ((omt**3 - omt)*m0 + (t**3 - t)*m1) / 6._dl
+
+    end function TInteractingDE_SplineValue
+
+    function TInteractingDE_TableWIsSafe(this) result(is_safe)
+    class(TInteractingDE), intent(in) :: this
+    logical :: is_safe
+    integer :: i
+    real(dl) :: y0, y1, m0, m1, width, c0, c1, c2, discriminant, root
+
+    is_safe = .false.
+    if (this%equation_of_state%n < 2) return
+    if (.not. allocated(this%equation_of_state%X)) return
+    if (.not. allocated(this%equation_of_state%F)) return
+    if (.not. allocated(this%equation_of_state%ddF)) return
+    if (.not. all(ieee_is_finite(this%equation_of_state%X))) return
+    if (.not. all(ieee_is_finite(this%equation_of_state%F))) return
+    if (.not. all(ieee_is_finite(this%equation_of_state%ddF))) return
+    if (any(this%equation_of_state%X(2:) <= this%equation_of_state%X(:this%equation_of_state%n-1))) return
+    if (any(1._dl + this%equation_of_state%F <= ide_w_safe_epsilon)) return
+
+    do i = 1, this%equation_of_state%n - 1
+        y0 = this%equation_of_state%F(i)
+        y1 = this%equation_of_state%F(i+1)
+        m0 = this%equation_of_state%ddF(i)
+        m1 = this%equation_of_state%ddF(i+1)
+        width = this%equation_of_state%X(i+1) - this%equation_of_state%X(i)
+        c0 = y1 - y0 + width**2 * (-2._dl*m0 - m1) / 6._dl
+        c1 = width**2 * m0
+        c2 = width**2 * (m1 - m0) / 2._dl
+
+        if (abs(c2) > tiny(1._dl)) then
+            discriminant = c1**2 - 4._dl*c2*c0
+            if (discriminant >= 0._dl) then
+                root = (-c1 + sqrt(discriminant)) / (2._dl*c2)
+                if (root > 0._dl .and. root < 1._dl) then
+                    if (1._dl + TInteractingDE_SplineValue(y0, y1, m0, m1, width, root) &
+                        <= ide_w_safe_epsilon) return
+                end if
+                root = (-c1 - sqrt(discriminant)) / (2._dl*c2)
+                if (root > 0._dl .and. root < 1._dl) then
+                    if (1._dl + TInteractingDE_SplineValue(y0, y1, m0, m1, width, root) &
+                        <= ide_w_safe_epsilon) return
+                end if
+            end if
+        else if (abs(c1) > tiny(1._dl)) then
+            root = -c0/c1
+            if (root > 0._dl .and. root < 1._dl) then
+                if (1._dl + TInteractingDE_SplineValue(y0, y1, m0, m1, width, root) &
+                    <= ide_w_safe_epsilon) return
+            end if
+        end if
+    end do
+    is_safe = .true.
+
+    end function TInteractingDE_TableWIsSafe
+
+    subroutine TInteractingDE_CheckParams(this, OK, message)
+    class(TInteractingDE), intent(in) :: this
+    logical, intent(out) :: OK
+    character(len=*), intent(out) :: message
+
+    OK = .false.
+    message = ''
+    if (this%interaction_type /= ide_Q_H_rho_de) then
+        message = 'InteractingDE supports only interaction_type=1; types 2 and 3 are disabled because their '// &
+            'background continuity equations are incomplete.'
+        return
+    end if
+    if (.not. ieee_is_finite(this%xi_ide)) then
+        message = 'InteractingDE xi_ide must be finite.'
+        return
+    end if
+    if (.not. ieee_is_finite(this%cs2_ide) .or. this%cs2_ide < 0._dl) then
+        message = 'InteractingDE cs2_ide must be finite and non-negative.'
+        return
+    end if
+    if (.not. ieee_is_finite(this%w_lam) .or. .not. ieee_is_finite(this%wa)) then
+        message = 'InteractingDE w and wa must be finite.'
+        return
+    end if
+    if (this%use_tabulated_w) then
+        if (.not. TInteractingDE_TableWIsSafe(this)) then
+            message = 'InteractingDE tabulated w(a) must satisfy 1+w(a)>1e-6 at nodes and between nodes.'
+            return
+        end if
+    else
+        if (this%w_lam + this%wa > 0._dl) then
+            message = 'InteractingDE has w+wa>0, giving w>0 at high redshift.'
+            return
+        end if
+        if (.not. (this%w_lam == -1._dl .and. this%wa == 0._dl)) then
+            if (this%w_lam <= -1._dl + ide_w_safe_epsilon .or. &
+                this%w_lam + this%wa <= -1._dl + ide_w_safe_epsilon) then
+                message = 'InteractingDE does not support phantom or w=-1 crossing. Use w=-1, wa=0, or require '// &
+                    '1+w(a)>1e-6 until an interacting-DE PPF implementation is available.'
+                return
+            end if
+        end if
+    end if
+    OK = .true.
+
+    end subroutine TInteractingDE_CheckParams
+
+    subroutine TInteractingDE_Validate(this, OK)
+    class(TInteractingDE), intent(in) :: this
+    logical, intent(inout) :: OK
+    logical :: ide_ok
+    character(len=512) :: message
+
+    call this%TDarkEnergyEqnOfState%Validate(OK)
+    call TInteractingDE_CheckParams(this, ide_ok, message)
+    if (.not. ide_ok) then
+        OK = .false.
+        write(*,'(A)') trim(message)
+    end if
+
+    end subroutine TInteractingDE_Validate
+
     subroutine TInteractingDE_ReadParams(this, Ini)
     use IniObjects
     class(TInteractingDE) :: this
     class(TIniFile), intent(in) :: Ini
+    logical :: OK
+    character(len=512) :: message
 
     call this%TDarkEnergyEqnOfState%ReadParams(Ini)
     this%xi_ide = Ini%Read_Double('xi_ide', 0._dl)
     this%interaction_type = Ini%Read_Int('interaction_type', 1)
     this%cs2_ide = Ini%Read_Double('cs2_ide', 1._dl)
+    call TInteractingDE_CheckParams(this, OK, message)
+    if (.not. OK) error stop trim(message)
 
     end subroutine TInteractingDE_ReadParams
 
@@ -100,6 +233,14 @@
     class(TInteractingDE), intent(inout) :: this
     class(TCAMBdata), intent(in), target :: State
     real(dl) :: h2
+    logical :: OK
+    character(len=512) :: message
+
+    call TInteractingDE_CheckParams(this, OK, message)
+    if (.not. OK) then
+        call GlobalError(trim(message), error_unsupported_params)
+        return
+    end if
 
     call this%TDarkEnergyEqnOfState%Init(State)
 
@@ -302,15 +443,26 @@
     real(dl), intent(in) :: a, adotoa, w, k, z, y(:)
     integer, intent(in) :: w_ix
     real(dl) :: Hv3_over_k, Q_over_rho_de, delta_de, v_de_1pw
-    real(dl) :: cs2, loga
+    real(dl) :: cs2, loga, one_plus_w, velocity_term
 
     if (this%num_perturb_equations == 0) return
 
     delta_de = y(w_ix)
     v_de_1pw = y(w_ix + 1)  ! (1+w)*v_de
     cs2 = this%cs2_ide
+    one_plus_w = 1._dl + w
 
-    Hv3_over_k = 3._dl * adotoa * v_de_1pw / k / max(abs(1._dl + w), 1e-6_dl)
+    if (one_plus_w > ide_w_safe_epsilon) then
+        Hv3_over_k = 3._dl * adotoa * v_de_1pw / k / one_plus_w
+        velocity_term = one_plus_w * k * v_de_1pw / one_plus_w
+    else if (one_plus_w == 0._dl) then
+        Hv3_over_k = 0._dl
+        velocity_term = 0._dl
+    else
+        call GlobalError('InteractingDE reached an unsupported phantom or w=-1-crossing state.', &
+            error_unsupported_params)
+        return
+    end if
 
     ! Compute Q/(rho_de * H) = xi for type 1
     ! The perturbation equations follow Valiviita+ 2008, Gavela+ 2009
@@ -337,9 +489,8 @@
     ! For type 1 (Q=xi*H*rho_de):
     !   Additional: +xi*H*(delta_c - delta_de) where delta_c comes from constraint
     !   At leading order, the xi terms modify the effective w evolution
-    ayprime(w_ix) = -3._dl * adotoa * (cs2 - w) * (delta_de + (1._dl + w) * Hv3_over_k) &
-        - (1._dl + w) * k * v_de_1pw / max(abs(1._dl + w), 1e-6_dl) &
-        - (1._dl + w) * k * z
+    ayprime(w_ix) = -3._dl * adotoa * (cs2 - w) * (delta_de + one_plus_w * Hv3_over_k) &
+        - velocity_term - one_plus_w * k * z
 
     ! Add w derivative term for wa parametrization
     if (.not. this%use_tabulated_w) then
@@ -364,7 +515,7 @@
     ! DE velocity equation:
     ! (1+w)*v_de' = -H*(1-3cs2)*(1+w)*v_de + k*cs2*delta_de
     !             + interaction terms
-    if (abs(1._dl + w) > 1e-6_dl) then
+    if (one_plus_w > ide_w_safe_epsilon) then
         ayprime(w_ix + 1) = -adotoa * (1._dl - 3._dl * cs2) * v_de_1pw + &
             k * cs2 * delta_de
         ! Interaction term in velocity

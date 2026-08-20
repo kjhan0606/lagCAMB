@@ -4,6 +4,8 @@
     use results
     use constants
     use classes
+    use config, only: GlobalError, error_unsupported_params
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
 
     ! Generalized Chaplygin gas (GCG) as the dark-energy component.
@@ -44,6 +46,7 @@
         Type(TCubicSpline) :: cs2ofa   ! rest-frame cs2 as function of log(a)
     contains
     procedure :: ReadParams => TChaplygin_ReadParams
+    procedure :: Validate => TChaplygin_Validate
     procedure, nopass :: PythonClass => TChaplygin_PythonClass
     procedure, nopass :: SelfPointer => TChaplygin_SelfPointer
     procedure :: Init => TChaplygin_Init
@@ -52,6 +55,20 @@
     end type TChaplygin
 
     contains
+
+    subroutine TChaplygin_Validate(this, OK)
+    class(TChaplygin), intent(in) :: this
+    logical, intent(inout) :: OK
+
+    call this%TDarkEnergyFluid%Validate(OK)
+    if (.not. ieee_is_finite(this%As) .or. .not. ieee_is_finite(this%alpha) .or. &
+        this%As <= 0._dl .or. this%As >= 1._dl .or. this%alpha < 0._dl .or. &
+        this%alpha*this%As > 1._dl) then
+        OK = .false.
+        write(*,*) 'Chaplygin requires finite 0<As<1, alpha>=0, and alpha*As<=1.'
+    end if
+
+    end subroutine TChaplygin_Validate
 
     subroutine TChaplygin_SetChaplyginParams(this, Asin, alphain)
     class(TChaplygin), intent(inout) :: this
@@ -103,10 +120,13 @@
     real(dl) :: opa, denom, lna_min, dlna
     integer  :: n, i
 
-    if (this%As <= 0._dl .or. this%As >= 1._dl) &
-        error stop 'Chaplygin: As (=A/rho_de0^(1+alpha)) must be in (0,1)'
-    if (this%alpha < 0._dl) &
-        error stop 'Chaplygin: alpha must be >= 0'
+    if (.not. ieee_is_finite(this%As) .or. .not. ieee_is_finite(this%alpha) .or. &
+        this%As <= 0._dl .or. this%As >= 1._dl .or. this%alpha < 0._dl .or. &
+        this%alpha*this%As > 1._dl) then
+        call GlobalError('Chaplygin requires finite 0<As<1, alpha>=0, and alpha*As<=1.', &
+            error_unsupported_params)
+        return
+    end if
 
     n = this%n_tab
     allocate(a(n), w(n), cs2(n))

@@ -306,7 +306,10 @@ def setup_fuzzydm():
 
     def _multi():
         out = []
-        for mass, fax, lab in [(1e-24, 0.3, r"$m=10^{-24}$ eV, $f=0.3$"), (1e-25, 0.3, r"$m=10^{-25}$ eV, $f=0.3$")]:
+        for mass, fax, lab in [
+            (1e-23, 0.05, r"$m=10^{-23}$ eV, $f=0.05$"),
+            (1e-22, 0.05, r"$m=10^{-22}$ eV, $f=0.05$"),
+        ]:
             pars = camb.CAMBparams()
             pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
             pars.InitPower.set_params(As=2.1e-9, ns=0.965)
@@ -448,24 +451,10 @@ def setup_interactingde():
 
 
 def setup_horndeski():
-    """Horndeski Gravity"""
+    """Archived HorndeskiDE path; active figure generation is disabled."""
 
     def _multi():
-        out = []
-        for aM, lab in [(0.1, r"$\alpha_M=0.1$"), (0.5, r"$\alpha_M=0.5$")]:
-            pars = camb.CAMBparams()
-            pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
-            pars.InitPower.set_params(As=2.1e-9, ns=0.965)
-            pars.set_for_lmax(2500, lens_potential_accuracy=1)
-            pars.WantTransfer = True
-            pars.set_matter_power(redshifts=[0], kmax=10.0)
-            from camb.dark_energy import HorndeskiDE
-
-            pars.DarkEnergy = HorndeskiDE()
-            pars.DarkEnergy.set_params(alpha_M=aM, M_star_ini=1.0)
-            results = camb.get_results(pars)
-            out.append((pars, results, lab))
-        return out
+        raise RuntimeError("Active HorndeskiDE figure generation is disabled pending physical validation")
 
     return _multi
 
@@ -498,27 +487,10 @@ def setup_multi_idm():
 
 
 def setup_fuzzydm_field():
-    """Fuzzy DM Field (Klein-Gordon)"""
+    """Archived FuzzyDMField path; active figure generation is disabled."""
 
     def _multi():
-        out = []
-        for mass, fax, lab in [
-            (1e-22, 0.05, r"$m=10^{-22}$ eV, $f=0.05$"),
-            (1e-23, 0.05, r"$m=10^{-23}$ eV, $f=0.05$"),
-        ]:
-            pars = camb.CAMBparams()
-            pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122 * (1.0 - fax))
-            pars.InitPower.set_params(As=2.1e-9, ns=0.965)
-            pars.set_for_lmax(2500, lens_potential_accuracy=1)
-            pars.WantTransfer = True
-            pars.set_matter_power(redshifts=[0], kmax=10.0)
-            from camb.dark_energy import FuzzyDMField
-
-            pars.DarkEnergy = FuzzyDMField()
-            pars.DarkEnergy.set_params(m_axion=mass, f_axion=fax)
-            results = camb.get_results(pars)
-            out.append((pars, results, lab))
-        return out
+        raise RuntimeError("Active FuzzyDMField figure generation is disabled pending physical validation")
 
     return _multi
 
@@ -622,13 +594,11 @@ if __name__ == "__main__":
         (setup_ethos_physical(), "ETHOS Transfer (Physical)", True),
         (setup_dmphoton(), "DM-Photon Scattering", True),
         (setup_interactingde(), "Interacting Dark Energy", True),
-        (setup_horndeski(), "Horndeski Gravity", True),
         (setup_musigma(), "Mu-Sigma Modified Gravity", True),
         (setup_fr(), "fR Gravity", True),
         (setup_ndgp(), "nDGP Gravity", True),
         (setup_symmetron(), "Symmetron Gravity", True),
         (setup_multi_idm(), "Multi-Channel Interacting DM", True),
-        (setup_fuzzydm_field(), "Fuzzy DM Field", True),
     ]
 
     success, fail = 0, 0

@@ -268,6 +268,9 @@
     procedure :: SetParams => CAMBdata_SetParams
     procedure :: Free => CAMBdata_Free
     procedure :: grho_no_de
+    procedure :: gpres_no_de
+    procedure :: grho_no_dm_de
+    procedure :: gpres_no_dm_de
     procedure :: GetReionizationOptDepth
     procedure :: rofChi
     procedure :: cosfunc
@@ -976,7 +979,7 @@
     class(CAMBdata) :: this
     integer, intent(in) :: n
     real(dl), intent(in) :: a_arr(n)
-    real(dl) :: grhov_t, rhonu, grhonu, a
+    real(dl) :: grhov_t, rhonu, grhonu, grhoc_t, a
     real(dl), intent(out) :: densities(8,n)
     integer nu_i,i
 
@@ -998,8 +1001,14 @@
         end if
 
         densities(2,i) = this%grhok * a**2
-        densities(3,i) = this%grhoc * a &
-            + this%CP%DarkEnergy%CDM_BackgroundCorrection(this%grhoc, this%grhov, a) * a**2
+        if (allocated(this%CP%DarkMatter) .and. .not. this%CP%DarkMatter%is_standard_cdm) then
+            call this%CP%DarkMatter%BackgroundDensityAndPressure(this%grhoc, a, grhoc_t)
+            densities(3,i) = grhoc_t*a**2
+        else
+            densities(3,i) = this%grhoc*a
+        end if
+        densities(3,i) = densities(3,i) + &
+            this%CP%DarkEnergy%CDM_BackgroundCorrection(this%grhoc, this%grhov, a)*a**2
         densities(4,i) = this%grhob * a
         densities(5,i) = this%grhog
         densities(6,i) = this%grhornomass
@@ -1269,7 +1278,7 @@
 
     grhoa2 = this%grhok * a**2 + this%grhob * a + this%grhog + this%grhornomass
     ! CDM contribution: allow DarkMatter override (e.g. DecayingDM)
-    if (allocated(this%CP%DarkMatter)) then
+    if (allocated(this%CP%DarkMatter) .and. .not. this%CP%DarkMatter%is_standard_cdm) then
         call this%CP%DarkMatter%BackgroundDensityAndPressure(this%grhoc, a, grhoc_t)
         grhoa2 = grhoa2 + grhoc_t * a**2  ! grhoc_t = 8piG*rho*a^2
     else
@@ -1297,6 +1306,77 @@
     grhoa2 = grhoa2 + this%grhodmdr * a + this%grhodr
 
     end function grho_no_de
+
+    function grho_no_dm_de(this, a) result(grhoa2)
+    ! Return 8*pi*G*rho*a**4 excluding the active DarkMatter and DarkEnergy
+    ! slots. This non-virtual helper is safe inside a DarkMatter background
+    ! solver and prevents recursive dispatch through grho_no_de().
+    class(CAMBdata) :: this
+    real(dl), intent(in) :: a
+    real(dl) :: grhoa2, rhonu
+    integer :: nu_i
+
+    grhoa2 = this%grhok*a**2 + this%grhob*a + this%grhog + this%grhornomass
+    if (this%CP%Num_Nu_massive /= 0) then
+        do nu_i = 1, this%CP%nu_mass_eigenstates
+            if (CustomNuPSD(nu_i)%active) then
+                call CustomNuPSD(nu_i)%rho(a*this%nu_masses(nu_i), rhonu)
+            else
+                call ThermalNuBack%rho(a*this%nu_masses(nu_i), rhonu)
+            end if
+            grhoa2 = grhoa2 + rhonu*this%grhormass(nu_i)
+        end do
+    end if
+
+    end function grho_no_dm_de
+
+    function gpres_no_de(this, a) result(gpresa2)
+    ! Return 8*pi*G*P_no_de*a**4, including pressure from a non-standard
+    ! dark-matter background (zero for the standard-CDM/null path).
+    class(CAMBdata) :: this
+    real(dl), intent(in) :: a
+    real(dl) :: gpresa2, rhonu, pnu, grhoc_t, gpres_dm
+    integer :: nu_i
+
+    gpresa2 = (this%grhog + this%grhornomass)/3._dl
+    if (allocated(this%CP%DarkMatter) .and. this%CP%DarkMatter%has_background_pressure) then
+        call this%CP%DarkMatter%BackgroundDensityAndPressure(this%grhoc, a, grhoc_t, gpres_dm)
+        gpresa2 = gpresa2 + gpres_dm*a**2
+    end if
+    if (this%CP%Num_Nu_massive /= 0) then
+        do nu_i = 1, this%CP%nu_mass_eigenstates
+            if (CustomNuPSD(nu_i)%active) then
+                call CustomNuPSD(nu_i)%rho_P(a*this%nu_masses(nu_i), rhonu, pnu)
+            else
+                call ThermalNuBack%rho_P(a*this%nu_masses(nu_i), rhonu, pnu)
+            end if
+            gpresa2 = gpresa2 + pnu*this%grhormass(nu_i)
+        end do
+    end if
+    gpresa2 = gpresa2 + this%grhodr/3._dl
+
+    end function gpres_no_de
+
+    function gpres_no_dm_de(this, a) result(gpresa2)
+    ! Return 8*pi*G*P*a**4 excluding DarkMatter and DarkEnergy.
+    class(CAMBdata) :: this
+    real(dl), intent(in) :: a
+    real(dl) :: gpresa2, rhonu, pnu
+    integer :: nu_i
+
+    gpresa2 = (this%grhog + this%grhornomass)/3._dl
+    if (this%CP%Num_Nu_massive /= 0) then
+        do nu_i = 1, this%CP%nu_mass_eigenstates
+            if (CustomNuPSD(nu_i)%active) then
+                call CustomNuPSD(nu_i)%rho_P(a*this%nu_masses(nu_i), rhonu, pnu)
+            else
+                call ThermalNuBack%rho_P(a*this%nu_masses(nu_i), rhonu, pnu)
+            end if
+            gpresa2 = gpresa2 + pnu*this%grhormass(nu_i)
+        end do
+    end if
+
+    end function gpres_no_dm_de
 
     function GetReionizationOptDepth(this)
     class(CAMBdata) :: this

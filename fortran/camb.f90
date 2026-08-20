@@ -9,6 +9,7 @@
     use Recombination, only : TRecFast
     use lensing
     use DarkEnergyFluid
+    use InteractingDE
     use DMBaryon
     use DMDR_ETHOS
     use NonLinear_SIDM
@@ -413,6 +414,8 @@
         allocate (TAxionEffectiveFluid::P%DarkEnergy)
     else if (DarkEneryModel == 'EARLYQUINTESSENCE') then
         allocate (TEarlyQuintessence::P%DarkEnergy)
+    else if (DarkEneryModel == 'INTERACTINGDE') then
+        allocate (TInteractingDE::P%DarkEnergy)
     else
         ErrMsg = 'Unknown dark energy model: '//trim(DarkEneryModel)
         return
@@ -798,6 +801,7 @@
         write(*,*) trim(ErrMsg)
         error stop
     end if
+    if (.not. P%Validate()) error stop 'Invalid parameter value'
 
     call Ini%Close()
 
@@ -839,19 +843,16 @@
     subroutine CAMB_FreeGlobalMemory()
     use SpherBessels
     use CAMBmain
+    use MassiveNu, only: ClearThermalNuBackground, ClearCustomNuPSD
+    use MuSigmaMG, only: MuSigmaMG_ClearTables
     call Bessels_Free()
     !flat sky lensing also allocates bessels, but not normally used.
     call CAMBMain_Free()
     if (allocated(highL_CL_template)) deallocate(highL_CL_template)
     if (allocated(nu_tau_notmassless)) deallocate(nu_tau_notmassless)
-    if (allocated(ThermalNuBackground%r1)) deallocate(ThermalNuBackground%r1)
-    if (allocated(ThermalNuBackground%p1)) deallocate(ThermalNuBackground%p1)
-    if (allocated(ThermalNuBackground%dr1)) deallocate(ThermalNuBackground%dr1)
-    if (allocated(ThermalNuBackground%dp1)) deallocate(ThermalNuBackground%dp1)
-    if (allocated(ThermalNuBackground%pp1)) deallocate(ThermalNuBackground%pp1)
-    if (allocated(ThermalNuBackground%dpp1)) deallocate(ThermalNuBackground%dpp1)
-    if (allocated(ThermalNuBackground%iv21)) deallocate(ThermalNuBackground%iv21)
-    if (allocated(ThermalNuBackground%div21)) deallocate(ThermalNuBackground%div21)
+    call ClearThermalNuBackground()
+    call ClearCustomNuPSD()
+    call MuSigmaMG_ClearTables()
 
     end subroutine CAMB_FreeGlobalMemory
 

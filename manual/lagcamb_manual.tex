@@ -210,7 +210,7 @@ Multi-IDM & DM & Combined channels & Becker+ 2021 \\
 ETHOS Transfer (Murgia) & DM & Small-scale $T(k)$ fit & Murgia+ 2017 \\
 ETHOS Transfer (Physical) & DM & ETHOS params $\to T(k)$ & Cyr-Racine+ 2016 \\
 Interacting DE & DE & DM--DE energy exchange & Costa+ 2017 \\
-Horndeski & DE/MG & Scalar-tensor gravity (QSA) & Bellini \& Sawicki 2014 \\
+HorndeskiDE & DE/MG & Archived; active path disabled & Bellini \& Sawicki 2014 \\
 $\mu$-$\Sigma$ MG & MG & Phenomenological MG & Zhao+ 2009 \\
 $f(R)$ Hu--Sawicki & MG & Scalaron fifth force (QSA) & Hu \& Sawicki 2007 \\
 nDGP & MG & Brane-induced gravity (QSA) & Dvali+ 2000 \\
@@ -456,11 +456,13 @@ results = camb.get_results(pars)
 \subsection{Fuzzy Dark Matter}
 
 \begin{physbox}{Physics}
-Ultralight axion dark matter ($m \sim 10^{-22}$ eV) with de Broglie wavelength on astrophysical scales. The effective fluid has a scale-dependent sound speed:
+Ultralight axion dark matter ($m \sim 10^{-22}$ eV) with de Broglie wavelength on astrophysical scales. Before averaging is valid, lagCAMB evolves the quadratic Klein--Gordon background and perturbations. After the common KG--EFA switch, the Passaglia--Hu fluid has scale-dependent sound speed
 \begin{equation}
-    c_s^2(k, a) = \frac{k^2}{4\, m^2\, a^2}
+    c_s^2(k,a)=\frac{(\sqrt{1+\alpha}-1)^2}{\alpha}
+    +\frac{5}{4}\left(\frac{H}{m}\right)^2,
+    \qquad \alpha=\left(\frac{k}{am}\right)^2,
 \end{equation}
-producing a quantum Jeans scale $k_J^2 = 4\, m_{\rm conf}\, a^2\, \dot{a}/a$ below which density perturbations are suppressed by quantum pressure.
+producing a scale-dependent quantum-pressure suppression below the corresponding Jeans scale.
 \end{physbox}
 
 \begin{parambox}{Parameters}
@@ -470,7 +472,8 @@ Name & Type & Default & Description \\
 \midrule
 \texttt{m\_axion} & float & $10^{-22}$ & Axion mass [eV] \\
 \texttt{omega\_axion\_h2} & float & 0.0 & Axion density $\Omega_a h^2$ (0 uses \texttt{f\_axion}) \\
-\texttt{f\_axion} & float & 1.0 & Fraction of CDM that is ULDM \\
+\texttt{f\_axion} & float & 0.0 & Fraction of CDM that is ULDM \\
+\texttt{match\_ratio} & int & 50 & Common KG$\to$EFA threshold $m/H$ (50--75) \\
 \bottomrule
 \end{tabular}
 \end{parambox}
@@ -487,8 +490,9 @@ pars.set_matter_power(redshifts=[0], kmax=10.0)
 
 pars.DarkMatter = FuzzyDM()
 pars.DarkMatter.set_params(
-    m_axion=1e-24,        # 10^{-24} eV
-    f_axion=0.3           # 30% of CDM is ULDM
+    m_axion=1e-22,        # 10^{-22} eV
+    f_axion=0.05,         # 5% of CDM is ULDM
+    match_ratio=50
 )
 results = camb.get_results(pars)
 \end{lstlisting}
@@ -500,7 +504,29 @@ results = camb.get_results(pars)
 \end{figure}
 
 \begin{notebox}
-A full Klein--Gordon field implementation (\texttt{FuzzyDMField}) is also available in the DarkEnergy slot, solving the exact background evolution including the frozen-field era and Passaglia--Hu improved EFA for perturbations. See Section~\ref{sec:fuzzyfield}.
+\texttt{FuzzyDM} replaces a fraction of the total \texttt{omch2} budget. A
+log-space shoot fixes the requested density today. The frozen and first
+oscillatory regimes use exact KG variables $(\delta\phi,\delta\phi')$; every
+$k$ mode then stops on the same $m/H=\texttt{match\_ratio}$ hypersurface, where
+the Passaglia--Hu map initializes $(\delta_a,u_a)$. A conservative $C^1$
+window blends exact and EFA stress--energy. Active models are restricted to
+$10^{-23}\leq m/{\rm eV}\leq10^{-21}$,
+$10^{-3}\leq f_{\rm axion}\leq0.1$, $50\leq\texttt{match\_ratio}\leq75$,
+and a cosmological-constant dark-energy background.
+
+At $f_{\rm axion}=0.05$, the maximum model-to-null double-ratio residuals
+against the archived AxiCLASS benchmark are 1.15\%, 1.11\%, and 0.87\% for
+$m=10^{-23},10^{-22},10^{-21}$ eV over $k\leq10,30,50\,h\,{\rm Mpc}^{-1}$.
+Changing the match ratio from 50 to 75 changes these lagCAMB spectra by less
+than $5\times10^{-5}$. The abundance interval remains a guard contract, not a
+precision claim over every $f_{\rm axion}$.
+
+The older DarkEnergy-slot implementation \texttt{FuzzyDMField} is retained for
+code recovery but remains disabled. The DarkMatter-slot \texttt{FuzzyDM} path
+is conditionally validated for the reported $z=0$ linear-power benchmarks at
+$f_{\rm axion}=0.05$. The wider abundance interval is a guard, not a precision
+domain; CMB and lensing outputs have no independent exact-solver comparison.
+See Section~\ref{sec:fuzzyfield}.
 \end{notebox}
 
 
@@ -788,13 +814,10 @@ Dark matter and dark energy exchange energy-momentum $Q^\mu$. The background con
     \dot\rho_c + 3H\rho_c &= Q, &
     \dot\rho_{\rm de} + 3(1+w)H\rho_{\rm de} &= -Q
 \end{align}
-Three interaction kernels:
-\begin{enumerate}[nosep]
-    \item $Q = \xi\, H\, \rho_{\rm de}$
-    \item $Q = \xi\, H\, \rho_c$
-    \item $Q = \xi\, H\, (\rho_c + \rho_{\rm de})$
-\end{enumerate}
-Perturbation equations are derived consistently from the energy-momentum tensor.
+The science-supported kernel is
+$Q = \xi\, H\, \rho_{\rm de}$ (interaction type 1). Types 2 and 3 are blocked
+because their background continuity equations are incomplete. The perturbation
+velocity variable is stored as $(1+w)v_{\rm de}$.
 \end{physbox}
 
 \begin{parambox}{Parameters}
@@ -805,8 +828,8 @@ Name & Type & Default & Description \\
 \texttt{w} & float & $-1.0$ & $w(0)$ equation of state \\
 \texttt{wa} & float & 0 & $-dw/da(0)$ \\
 \texttt{xi\_ide} & float & 0.0 & Coupling strength \\
-\texttt{interaction\_type} & int & 1 & Kernel type (1, 2, or 3) \\
-\texttt{cs2\_ide} & float & 1.0 & DE sound speed squared \\
+\texttt{interaction\_type} & int & 1 & Supported kernel type (type 1 only) \\
+\texttt{cs2\_ide} & float & 1.0 & DE sound speed squared (validated value: 1) \\
 \bottomrule
 \end{tabular}
 \end{parambox}
@@ -838,6 +861,11 @@ results = camb.get_results(pars)
 
 \begin{notebox}
 \textbf{Important:} Always use \texttt{set\_params()} as a single method call. Do not set individual attributes, because \texttt{pars.DarkEnergy} returns a new Python wrapper each time, so individual setters lose previous changes.
+
+There is no interacting-DE PPF crossing prescription. The exact
+\texttt{w=-1, wa=0} case is supported. Other inputs must satisfy
+$1+w(a)>10^{-6}$ at every scale factor. Existing outputs made with interaction
+types 2 or 3 are not physical predictions and must not be used for science.
 \end{notebox}
 
 
@@ -863,6 +891,17 @@ In the quasi-static approximation (QSA), these modify:
 where $\mu$ and $\Sigma$ are derived from the $\alpha$-functions.
 \end{physbox}
 
+\begin{notebox}
+\textbf{Active path disabled.} The current \texttt{HorndeskiDE} class is not a
+validated general Horndeski solver. Its scalar perturbation and stability
+system is incomplete, the tested braiding response could not be traced in the
+matter spectrum, and no independent Horndeski-solver comparison has passed. A
+null scalar-spectrum response from $\alpha_K$ or $\alpha_T$ alone is not treated
+as diagnostic. Only exact $\Lambda$CDM (\texttt{w=-1}, \texttt{wa=0}, all alpha
+amplitudes zero, and \texttt{M\_star\_ini=1}) is accepted. Separately tested
+model-specific implementations remain available under \texttt{pars.MG}.
+\end{notebox}
+
 \begin{parambox}{Parameters}
 \begin{tabular}{llll}
 \toprule
@@ -878,32 +917,6 @@ Name & Type & Default & Description \\
 \bottomrule
 \end{tabular}
 \end{parambox}
-
-\begin{lstlisting}
-from camb.dark_energy import HorndeskiDE
-
-pars = camb.CAMBparams()
-pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122)
-pars.InitPower.set_params(As=2.1e-9, ns=0.965)
-pars.set_for_lmax(2500, lens_potential_accuracy=1)
-pars.WantTransfer = True
-pars.set_matter_power(redshifts=[0], kmax=10.0)
-
-pars.DarkEnergy = HorndeskiDE()
-pars.DarkEnergy.set_params(alpha_M=0.1, M_star_ini=1.0)
-results = camb.get_results(pars)
-\end{lstlisting}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=\textwidth]{figures/horndeski_gravity.pdf}
-\caption{Horndeski gravity: $\alpha_M$ modifies the Planck mass evolution, affecting CMB lensing and the late ISW effect. The matter $P(k)$ is mostly unchanged in the current QSA implementation (see note below).}
-\end{figure}
-
-\begin{notebox}
-\textbf{Known limitation (QSA):} In the current implementation, the Horndeski QSA only modifies the lensing (Weyl) potential and tensor propagation. Matter growth ($\sigma_8$) is \emph{not} modified because in synchronous gauge, the $\mu$-modification affects the first derivative of $\delta_c$ rather than the second, giving incorrect growth for time-dependent $\mu$. A constant $M_*^2$ (\texttt{M\_star\_ini} $\ne 1$) works correctly through accumulated state change. Full scalar field perturbation equations are needed for proper growth modification.
-\end{notebox}
-
 
 % -------- mu-Sigma MG --------
 \newpage
@@ -959,6 +972,11 @@ results = camb.get_results(pars)
 
 \begin{notebox}
 $\mu$--$\Sigma$ MG is set via \texttt{pars.MG} (not \texttt{DarkMatter} or \texttt{DarkEnergy}). It is mutually exclusive with \texttt{HorndeskiDE}. $\mu$ modifies matter growth (and hence $\sigma_8$) through an extra source in the $\eta k$ equation, and $\Sigma$ rescales the Weyl potential (lensing). The same machinery also powers the theory-specific QSA models below ($f(R)$, nDGP, Symmetron), selected via \texttt{pars.MG.set\_fR / set\_nDGP / set\_symmetron}.
+
+Tabulated $\mu(a)$ and $\Sigma(a)$ are process-global. Clear them with
+\texttt{pars.MG.clear\_tables()}, \texttt{pars.MG.clear\_MG\_model()}, or
+\texttt{camb.free\_global\_memory()} before an independent run. Selecting a
+named MG model also discards stale tables automatically.
 \end{notebox}
 
 
@@ -1115,7 +1133,7 @@ Linear theory only: symmetron screening of collapsed objects is \emph{not} inclu
 \subsection{Fuzzy DM Field (Klein--Gordon Solver)}\label{sec:fuzzyfield}
 
 \begin{physbox}{Physics}
-Full Klein--Gordon background solver for ultralight axion dark matter, placed in the DarkEnergy slot. Solves:
+Archived experimental Klein--Gordon/EFA implementation for ultralight axion dark matter, placed in the DarkEnergy slot. The intended field equation is:
 \begin{equation}
     \ddot\phi + 3H\dot\phi + \frac{dV}{d\phi} = 0, \quad V(\phi) = \tfrac{1}{2}m^2\phi^2
 \end{equation}
@@ -1124,6 +1142,14 @@ At early times ($m \ll H$), the field is frozen at $w = -1$. After oscillation o
     c_s^2 = \frac{k^2}{4m^2a^2 + k^2}
 \end{equation}
 \end{physbox}
+
+\begin{notebox}
+\textbf{Active path disabled.} Current validation found that the solver does not
+recover the requested present-day axion abundance and switches the background
+and perturbations to the EFA at different epochs. Active values of
+\texttt{f\_axion} or \texttt{omega\_axion\_h2} are therefore rejected. The
+zero-axion configuration remains only as a null regression path.
+\end{notebox}
 
 \begin{parambox}{Parameters}
 \begin{tabular}{llll}
@@ -1142,40 +1168,14 @@ Name & Type & Default & Description \\
 \end{tabular}
 \end{parambox}
 
-\begin{lstlisting}
-from camb.dark_energy import FuzzyDMField
-
-pars = camb.CAMBparams()
-# Reduce omch2 to make room for axion component
-pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122*(1-0.05))
-pars.InitPower.set_params(As=2.1e-9, ns=0.965)
-pars.set_for_lmax(2500, lens_potential_accuracy=1)
-pars.WantTransfer = True
-pars.set_matter_power(redshifts=[0], kmax=10.0)
-
-pars.DarkEnergy = FuzzyDMField()
-pars.DarkEnergy.set_params(m_axion=1e-22, f_axion=0.05)
-results = camb.get_results(pars)
-\end{lstlisting}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=\textwidth]{figures/fuzzy_dm_field.pdf}
-\caption{Fuzzy DM Field (Klein--Gordon): Lighter axion masses ($m=10^{-23}$ eV) oscillate later, producing larger-scale Jeans suppression. The exact KG-to-EFA matching reproduces ultralight-axion CDM-like behavior at high $k$ once oscillations begin.}
-\end{figure}
-
-\begin{notebox}
-\texttt{FuzzyDMField} lives in the DarkEnergy slot (not DarkMatter), because it needs to control background evolution. You must manually reduce \texttt{omch2} by the axion fraction: \texttt{omch2 *= (1 - f\_axion)}. The class cannot be pickled due to internal splines.
-\end{notebox}
-
-
 % ============================================================
 \newpage
 \section{Advanced Usage}
 
 \subsection{Combining DM and DE Models}
 
-DM and DE models occupy separate slots and can be combined freely:
+DM and DE models occupy separate slots and can be configured together, but each
+combined model requires independent validation:
 
 \begin{lstlisting}
 from camb.dark_matter import DMBaryonScattering
@@ -1245,6 +1245,16 @@ pars.MG.is_active = False                   # GR
 \subsection{Fortran--Python Interface}
 
 lagCAMB uses the same \texttt{ctypes} bridge as standard CAMB. Model parameters declared as \texttt{\_fields\_} in the Python class map to Fortran type fields at exact byte offsets. Models with Fortran \texttt{TCubicSpline} members (InteractingDE, HorndeskiDE) use \texttt{\_methods\_} to call Fortran setter subroutines instead.
+
+\subsection{Process-Global State and Cleanup}
+
+Tabulated $\mu(a)$/$\Sigma(a)$ functions and custom neutrino phase-space
+distributions are shared by all parameter objects in one process. Use
+\texttt{pars.MG.clear\_tables()} and \texttt{pars.clear\_ncdm\_psd()} for
+targeted cleanup. At independent-run boundaries,
+\texttt{camb.free\_global\_memory()} clears both tables and also releases the
+thermal-neutrino interpolation and perturbation caches. A subsequent run
+rebuilds those caches from its own parameters.
 
 \subsection{CAMB Density Convention}
 

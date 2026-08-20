@@ -1,0 +1,40 @@
+root = /tmp/lagcamb_fdm_axi_m1e23_
+output = tCl,pCl,lCl,mPk
+lensing = yes
+P_k_max_1/Mpc = 50
+z_pk = 0,1,9,49,99
+write background = yes
+write parameters = yes
+compute_sigma8 = yes
+
+omega_b = 0.02237
+omega_cdm = 0.114
+H0 = 67.36
+A_s = 2.1e-9
+n_s = 0.965
+tau_reio = 0.0544
+N_ur = 3.044
+N_ncdm = 0
+
+scf_potential = axionquad
+Omega_scf = 0.013223520517261809
+scf_parameters = 1e-23,0.1,0
+scf_tuning_index = 1
+axionquad_mass_is_log10 = no
+scf_evolve_as_fluid = yes
+scf_evolve_like_axionCAMB = yes
+threshold_scf_fluid_m_over_H = 3
+do_shooting = yes
+do_shooting_scf = yes
+scf_has_perturbations = yes
+use_big_theta_scf = no
+use_delta_scf_over_1plusw = no
+attractor_ic_scf = no
+use_ppf = no
+include_scf_in_delta_m = yes
+include_scf_in_delta_cb = no
+scf_shooting_parameter = 1.83292822047950235143e-02
+
+modes = s
+gauge = synchronous
+l_max_scalars = 3000

@@ -34,6 +34,7 @@
         real(dl), allocatable ::  nu_q(:), nu_int_kernel(:)
     contains
     procedure :: init => TNuPerturbations_init
+    procedure :: clear => TNuPerturbations_clear
     end type TNuPerturbations
 
     Type TThermalNuBackground
@@ -80,7 +81,7 @@
 
     public fermi_dirac_const,  sum_mnu_for_m1, neutrino_mass_fac, TNuPerturbations, &
         ThermalNuBackground, ThermalNuBack, TCustomNuPSD, CustomNuPSD, &
-        SetCustomNuPSD, ClearCustomNuPSD
+        SetCustomNuPSD, ClearCustomNuPSD, ClearThermalNuBackground
     contains
 
     subroutine sum_mnu_for_m1(summnu,dsummnu, m1, targ, sgn)
@@ -104,6 +105,7 @@
     real(dl) :: dq,dlfdlq, q
     integer i
 
+    call this%clear()
     this%nqmax=3
     if (Accuracy>1) this%nqmax=4
     if (Accuracy>2) this%nqmax=5
@@ -113,7 +115,6 @@
     !We evolve evolve 4F_l/dlfdlq(i), so kernel includes dlfdlnq factor
     !Integration scheme gets (Fermi-Dirac thing)*q^n exact,for n=-4, -2..2
     !see CAMB notes and https://camb.info/maple/nu_integration_kernels.py
-    if (allocated(this%nu_q)) deallocate(this%nu_q, this%nu_int_kernel)
     allocate(this%nu_q(this%nqmax))
     allocate(this%nu_int_kernel(this%nqmax))
 
@@ -150,6 +151,15 @@
     this%nu_int_kernel=this%nu_int_kernel/fermi_dirac_const
 
     end subroutine TNuPerturbations_init
+
+    subroutine TNuPerturbations_clear(this)
+    class(TNuPerturbations), intent(inout) :: this
+
+    if (allocated(this%nu_q)) deallocate(this%nu_q)
+    if (allocated(this%nu_int_kernel)) deallocate(this%nu_int_kernel)
+    this%nqmax = 0
+
+    end subroutine TNuPerturbations_clear
 
     subroutine ThermalNuBackground_init(this)
     use splines
@@ -207,6 +217,21 @@
     end if
 
     end subroutine ThermalNuBackground_init
+
+    subroutine ClearThermalNuBackground()
+
+    if (allocated(ThermalNuBackground%r1)) deallocate(ThermalNuBackground%r1)
+    if (allocated(ThermalNuBackground%p1)) deallocate(ThermalNuBackground%p1)
+    if (allocated(ThermalNuBackground%dr1)) deallocate(ThermalNuBackground%dr1)
+    if (allocated(ThermalNuBackground%dp1)) deallocate(ThermalNuBackground%dp1)
+    if (allocated(ThermalNuBackground%pp1)) deallocate(ThermalNuBackground%pp1)
+    if (allocated(ThermalNuBackground%dpp1)) deallocate(ThermalNuBackground%dpp1)
+    if (allocated(ThermalNuBackground%iv21)) deallocate(ThermalNuBackground%iv21)
+    if (allocated(ThermalNuBackground%div21)) deallocate(ThermalNuBackground%div21)
+    ThermalNuBackground%dam = 0._dl
+    nullify(ThermalNuBack)
+
+    end subroutine ClearThermalNuBackground
 
     subroutine nuRhoPres(am,rhonu,pnu)
     !  Compute the density and pressure of one eigenstate of massive neutrinos,
@@ -562,10 +587,15 @@
         if (allocated(CustomNuPSD(i)%q_tab)) deallocate(CustomNuPSD(i)%q_tab)
         if (allocated(CustomNuPSD(i)%f0_tab)) deallocate(CustomNuPSD(i)%f0_tab)
         if (allocated(CustomNuPSD(i)%nu_int_kernel)) deallocate(CustomNuPSD(i)%nu_int_kernel)
-        if (allocated(CustomNuPSD(i)%r1)) deallocate(CustomNuPSD(i)%r1, CustomNuPSD(i)%p1, &
-            CustomNuPSD(i)%dr1, CustomNuPSD(i)%dp1)
-        if (allocated(CustomNuPSD(i)%pp1)) deallocate(CustomNuPSD(i)%pp1, CustomNuPSD(i)%dpp1, &
-            CustomNuPSD(i)%iv21, CustomNuPSD(i)%div21)
+        if (allocated(CustomNuPSD(i)%r1)) deallocate(CustomNuPSD(i)%r1)
+        if (allocated(CustomNuPSD(i)%p1)) deallocate(CustomNuPSD(i)%p1)
+        if (allocated(CustomNuPSD(i)%dr1)) deallocate(CustomNuPSD(i)%dr1)
+        if (allocated(CustomNuPSD(i)%dp1)) deallocate(CustomNuPSD(i)%dp1)
+        if (allocated(CustomNuPSD(i)%pp1)) deallocate(CustomNuPSD(i)%pp1)
+        if (allocated(CustomNuPSD(i)%dpp1)) deallocate(CustomNuPSD(i)%dpp1)
+        if (allocated(CustomNuPSD(i)%iv21)) deallocate(CustomNuPSD(i)%iv21)
+        if (allocated(CustomNuPSD(i)%div21)) deallocate(CustomNuPSD(i)%div21)
+        CustomNuPSD(i)%dam_bg = 0._dl
     end do
     end subroutine ClearCustomNuPSD
 
@@ -776,8 +806,14 @@
     end do
 
     ! 3. Compute background spline tables
-    if (allocated(this%r1)) deallocate(this%r1, this%p1, this%dr1, this%dp1)
-    if (allocated(this%pp1)) deallocate(this%pp1, this%dpp1, this%iv21, this%div21)
+    if (allocated(this%r1)) deallocate(this%r1)
+    if (allocated(this%p1)) deallocate(this%p1)
+    if (allocated(this%dr1)) deallocate(this%dr1)
+    if (allocated(this%dp1)) deallocate(this%dp1)
+    if (allocated(this%pp1)) deallocate(this%pp1)
+    if (allocated(this%dpp1)) deallocate(this%dpp1)
+    if (allocated(this%iv21)) deallocate(this%iv21)
+    if (allocated(this%div21)) deallocate(this%div21)
     allocate(this%r1(nrhopn), this%p1(nrhopn), this%dr1(nrhopn), this%dp1(nrhopn))
     allocate(this%pp1(nrhopn), this%dpp1(nrhopn), this%iv21(nrhopn), this%div21(nrhopn))
     this%dam_bg = (am_max - am_min) / (nrhopn - 1)

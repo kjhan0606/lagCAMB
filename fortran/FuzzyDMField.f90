@@ -1,14 +1,12 @@
-    ! FuzzyDMField: Klein-Gordon background + EFA perturbations for ultralight axion DM
+    ! Archived experimental Klein-Gordon + EFA path for ultralight axion DM.
     !
     ! Solves the KG equation for V(phi) = (1/2) m^2 phi^2 to get correct background
     ! evolution (frozen w=-1 at early times, matter-like w=0 after oscillation onset).
     ! After a_match (where m/H = N_match), switches to effective fluid approximation
     ! for both background and perturbations.
     !
-    ! Placed in DarkEnergy slot. Usage:
-    !   pars.set_cosmology(omch2=0.12*(1-f_axion), ...)
-    !   pars.DarkEnergy = FuzzyDMField()
-    !   pars.DarkEnergy.set_params(m_axion=1e-22, f_axion=0.05)
+    ! Active axion configurations are disabled pending abundance normalization,
+    ! transition-matching fixes, and an independent reference comparison.
     !
     ! References:
     !   Hu, Barkana, Gruzinov 2000; Hlozek+ 2015, 2018
@@ -20,6 +18,8 @@
     use constants
     use classes
     use Interpolation
+    use config, only: GlobalError, error_unsupported_params
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     private
 
@@ -61,6 +61,7 @@
         class(CAMBdata), pointer :: bg_State => null()
     contains
     procedure :: Init => TFuzzyDMField_Init
+    procedure :: Validate => TFuzzyDMField_Validate
     procedure :: BackgroundDensityAndPressure => TFuzzyDMField_BackgroundDensityAndPressure
     procedure :: PerturbedStressEnergy => TFuzzyDMField_PerturbedStressEnergy
     procedure :: PerturbationEvolve => TFuzzyDMField_PerturbationEvolve
@@ -79,6 +80,27 @@
 
     public TFuzzyDMField
     contains
+
+    subroutine TFuzzyDMField_Validate(this, OK)
+    class(TFuzzyDMField), intent(in) :: this
+    logical, intent(inout) :: OK
+
+    call this%TDarkEnergyModel%Validate(OK)
+    if (.not. ieee_is_finite(this%m_axion) .or. .not. ieee_is_finite(this%f_axion) .or. &
+        .not. ieee_is_finite(this%omega_axion_h2) .or. .not. ieee_is_finite(this%f_decay) .or. &
+        this%m_axion <= 0._dl .or. this%f_axion < 0._dl .or. this%f_axion >= 1._dl .or. &
+        this%omega_axion_h2 < 0._dl .or. this%N_match <= 0 .or. &
+        (this%potential_type /= 1 .and. this%potential_type /= 2) .or. &
+        this%n_potential < 1 .or. this%f_decay <= 0._dl) then
+        OK = .false.
+        write(*,*) 'FuzzyDMField parameters are outside their finite physical ranges.'
+    end if
+    if (this%f_axion > 0._dl .or. this%omega_axion_h2 > 0._dl) then
+        OK = .false.
+        write(*,*) 'Active FuzzyDMField is disabled pending abundance and KG-to-EFA validation.'
+    end if
+
+    end subroutine TFuzzyDMField_Validate
 
 
     function VofPhi_val(this, phi) result(V)
@@ -221,6 +243,12 @@
     this%num_perturb_equations = 2
     astart = 1e-7_dl
     integrate_tol = 1e-6_dl
+
+    if (this%f_axion > 0._dl .or. this%omega_axion_h2 > 0._dl) then
+        call GlobalError('Active FuzzyDMField is disabled pending abundance and KG-to-EFA validation.', &
+            error_unsupported_params)
+        return
+    end if
 
     select type(S => State)
     class is (CAMBdata)

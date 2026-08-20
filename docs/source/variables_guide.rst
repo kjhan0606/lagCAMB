@@ -312,8 +312,8 @@ These variables are allocated dynamically in ``equations.f90`` via ``SetupScalar
      - CDM velocity
      - CDM velocity perturbation :math:`v_c`, allocated when DM model has ``has_cdm_velocity=.true.`` (e.g. DM-baryon, DM-neutrino scattering)
    * - ``EV%dm_ix``
-     - DM extra density
-     - Extra DM density equation (e.g. daughter DM in decaying models, axion density in fuzzy DM)
+     - DM model block
+     - Interacting-DM density for DM--DR models, or the start of the four-state FDM block ``(delta_phi, delta_phi_prime, delta_ax, u_ax)`` when ``num_dm_equations=4``
    * - ``EV%dr_ix``
      - DR hierarchy start
      - First index of dark radiation Boltzmann hierarchy :math:`F_0, F_1, \ldots, F_{l_\max}` (used in decaying DM, ETHOS)
@@ -330,9 +330,14 @@ These variables are allocated dynamically in ``equations.f90`` via ``SetupScalar
      - First index of dark energy perturbation variables: :math:`\delta_{de}` (at ``w_ix``) and :math:`(1+w)v_{de}` (at ``w_ix+1``) for fluid models
    * -
      -
-     - For InteractingDE, the interaction source terms (coupling CDM and DE perturbations) are added in ``equations.f90`` after the standard evolution
+     - For InteractingDE, the stored velocity variable is :math:`(1+w)v_{de}`. The type-1 interaction source terms are added in ``equations.f90`` after the standard evolution. Types 2 and 3 are disabled.
 
 **InteractingDE perturbation equations** (type 1: :math:`Q = \xi H \rho_{de}`):
+
+This branch does not implement an interacting-DE PPF crossing prescription.
+Except for the exact ``w=-1, wa=0`` case, inputs must satisfy
+:math:`1+w(a)>10^{-6}` throughout the evolution. The current regression-validated
+sound speed is :math:`c_s^2=1`.
 
 .. math::
 

@@ -250,7 +250,7 @@ class TrackerQuintessence(Quintessence):
     ``ic_mode=0`` starts the field frozen (:math:`d\phi/dN=0`) at ``phi_ini`` at
     :math:`a=10^{-6}`. ``ic_mode=1`` selects the matter-era Ratra--Peebles tracker
     and computes the initial field from the trial amplitude at every shooting step;
-    this is the physical :math:`\phi`CDM path.
+    this is the physical :math:`\phi\mathrm{CDM}` path.
     """
 
     _fields_ = (
@@ -281,10 +281,14 @@ class TrackerQuintessence(Quintessence):
         :param lam: exponential slope
         :param phi_ini: initial (frozen) field value at a=1e-6 in reduced Planck units
         """
+        if pot_type not in (1, 2):
+            raise ValueError("pot_type must be 1 (Ratra-Peebles) or 2 (exponential)")
         if ic_mode not in (0, 1):
             raise ValueError("ic_mode must be 0 (frozen) or 1 (Ratra-Peebles tracker)")
         if ic_mode == 1 and pot_type != 1:
             raise ValueError("ic_mode=1 is defined only for the Ratra-Peebles potential")
+        if not np.all(np.isfinite([alpha, lam, phi_ini])):
+            raise ValueError("tracker-quintessence parameters must be finite")
         if alpha <= 0 or lam <= 0 or (ic_mode == 0 and phi_ini <= 0):
             raise ValueError("active tracker-quintessence parameters must be positive")
         self.pot_type = pot_type
@@ -333,24 +337,31 @@ class CoupledQuintessence(TrackerQuintessence):
         :param alpha: Ratra-Peebles exponent
         :param lam: exponential slope
         :param phi_ini: initial (frozen) field value at a=1e-6 in reduced Planck units
-        :param beta: conformal coupling of the running CDM mass m_dm ~ exp(-beta*phi)
+        :param beta: conformal coupling of the running CDM mass m_dm ~ exp(-beta*phi),
+                     restricted to the validated range 0 <= beta <= 0.1
         """
+        if not np.isfinite(beta) or not 0 <= beta <= 0.1:
+            raise CAMBError("CoupledQuintessence beta must be finite and in the validated range 0<=beta<=0.1")
         super().set_params(pot_type=pot_type, alpha=alpha, lam=lam, phi_ini=phi_ini)
         self.beta = beta
 
 
 @fortran_class
 class InteractingDE(DarkEnergyEqnOfState):
-    """
+    r"""
     Interacting Dark Energy model with DM-DE energy-momentum exchange.
 
     Dark energy and dark matter exchange energy: Q_mu.
     Background: rho_c' + 3H*rho_c = Q, rho_de' + 3(1+w)H*rho_de = -Q
 
-    Interaction types:
-        1: Q = xi * H * rho_de
-        2: Q = xi * H * rho_c
-        3: Q = xi * H * (rho_c + rho_de)
+    The science-supported interaction is ``interaction_type=1``, with
+    :math:`Q = \xi H \rho_{de}`. Types 2 and 3 are disabled because their
+    background continuity equations are incomplete.
+
+    Until an interacting-DE PPF implementation is available, the equation of
+    state must either be exactly ``w=-1, wa=0`` or remain above ``-1`` with
+    ``1+w(a)>1e-6`` over the full scale-factor range. The perturbation velocity
+    variable is stored as :math:`(1+w)v_{de}`.
 
     References: Valiviita+ 2008, Costa+ 2017, IDECAMB (arXiv:2306.01593).
     """
@@ -366,6 +377,70 @@ class InteractingDE(DarkEnergyEqnOfState):
 
     _methods_ = (("SetIDEParams", [POINTER(c_double), POINTER(c_int), POINTER(c_double)]),)
 
+    _w_safe_epsilon = 1e-6
+
+    def validate_params(self) -> None:
+        if not np.isfinite(self.w) or not np.isfinite(self.wa):
+            raise CAMBError("InteractingDE w and wa must be finite")
+        super().validate_params()
+        if self.w == -1.0 and self.wa == 0.0:
+            return
+        safe_floor = -1 + self._w_safe_epsilon
+        if self.w <= safe_floor or self.w + self.wa <= safe_floor:
+            raise CAMBError(
+                "InteractingDE does not support phantom or w=-1 crossing. Use w=-1, wa=0, "
+                "or require 1+w(a)>1e-6 until an interacting-DE PPF implementation is available."
+            )
+
+    @classmethod
+    def _validate_w_table_spline(cls, a, w) -> None:
+        """Reject a tabulated equation of state whose natural cubic spline reaches the unsafe region."""
+        if a.ndim != 1 or w.ndim != 1 or len(a) != len(w) or len(a) < 2:
+            raise ValueError("InteractingDE w(a) tables must be one-dimensional arrays of equal length >= 2")
+        if not np.all(np.isfinite(a)) or not np.all(np.isfinite(w)):
+            raise ValueError("InteractingDE w(a) table values must be finite")
+        if np.any(a <= 0) or np.any(np.diff(a) <= 0):
+            raise ValueError("InteractingDE scale factors must be positive and strictly increasing")
+        if abs(a[-1] - 1.0) > 1e-5:
+            raise ValueError("InteractingDE w(a) arrays must end at a=1")
+
+        floor = -1 + cls._w_safe_epsilon
+        if np.any(w <= floor):
+            raise CAMBError("InteractingDE tabulated w(a) must satisfy 1+w(a)>1e-6 at every node")
+
+        x = np.log(a)
+        second = np.zeros_like(w)
+        if len(w) > 2:
+            h = np.diff(x)
+            matrix = np.diag(2 * (h[:-1] + h[1:]))
+            matrix += np.diag(h[1:-1], 1) + np.diag(h[1:-1], -1)
+            rhs = 6 * (np.diff(w)[1:] / h[1:] - np.diff(w)[:-1] / h[:-1])
+            second[1:-1] = np.linalg.solve(matrix, rhs)
+
+        for index, width in enumerate(np.diff(x)):
+            y0, y1 = w[index : index + 2]
+            m0, m1 = second[index : index + 2]
+            c0 = y1 - y0 + width**2 * (-2 * m0 - m1) / 6
+            c1 = width**2 * m0
+            c2 = width**2 * (m1 - m0) / 2
+            for root in np.roots((c2, c1, c0)):
+                if abs(root.imag) < 1e-12 and 0 < root.real < 1:
+                    t = root.real
+                    omt = 1 - t
+                    value = omt * y0 + t * y1 + width**2 * (
+                        (omt**3 - omt) * m0 + (t**3 - t) * m1
+                    ) / 6
+                    if value <= floor:
+                        raise CAMBError(
+                            "InteractingDE tabulated w(a) spline must satisfy 1+w(a)>1e-6 between nodes"
+                        )
+
+    def set_w_a_table(self, a, w) -> "DarkEnergyEqnOfState":
+        a = np.ascontiguousarray(a, dtype=np.float64)
+        w = np.ascontiguousarray(w, dtype=np.float64)
+        self._validate_w_table_spline(a, w)
+        return super().set_w_a_table(a, w)
+
     def set_params(self, w=-1.0, wa=0, xi_ide=0.0, interaction_type=1, cs2_ide=1.0, **kwargs):
         """
         Set interacting DE parameters. Must be called as a single method
@@ -374,13 +449,22 @@ class InteractingDE(DarkEnergyEqnOfState):
         :param w: w(0) equation of state
         :param wa: -dw/da(0)
         :param xi_ide: DM-DE coupling strength
-        :param interaction_type: Q kernel type (1=xi*H*rho_de, 2=xi*H*rho_c, 3=xi*H*(rho_c+rho_de))
-        :param cs2_ide: DE rest-frame sound speed squared
+        :param interaction_type: Q kernel type. Only type 1 (xi*H*rho_de) is supported.
+        :param cs2_ide: DE rest-frame sound speed squared. The validated science configuration is 1.
         """
+        if interaction_type != 1:
+            raise CAMBError(
+                "InteractingDE supports only interaction_type=1; types 2 and 3 are disabled because their "
+                "background continuity equations are incomplete."
+            )
+        if not np.isfinite(xi_ide):
+            raise CAMBError("InteractingDE xi_ide must be finite")
+        if not np.isfinite(cs2_ide) or cs2_ide < 0:
+            raise CAMBError("InteractingDE cs2_ide must be finite and non-negative")
+        self.use_tabulated_w = False
         self.w = w
         self.wa = wa
-        if interaction_type not in (1, 2, 3):
-            raise CAMBError("interaction_type must be 1, 2, or 3")
+        self.validate_params()
         self.f_SetIDEParams(
             byref(c_double(float(xi_ide))),
             byref(c_int(int(interaction_type))),
@@ -406,7 +490,7 @@ class RunningVacuum(DarkEnergyModel):
     Gomez-Valent/Sola/Basilakos linear treatment). The energy transfer feeds
     unclustered particles into the CDM, adding a dilution term
     :math:`-3\nu\mathcal{H}\,\delta_c` to the perturbed CDM continuity. For
-    :math:`\nu=0` the model is bit-identical to :math:`\Lambda`CDM.
+    :math:`\nu=0` the model is bit-identical to :math:`\Lambda\mathrm{CDM}`.
 
     Usage::
 
@@ -430,8 +514,10 @@ class RunningVacuum(DarkEnergyModel):
         Set the running-vacuum parameter.
 
         :param nu: dimensionless running coefficient of Lambda(H^2)=c0+nu*H^2
-                   (typical |nu| <= few x 1e-3; nu=0 gives LCDM).
+                   (typically abs(nu) is at most a few times 1e-3; nu=0 gives LCDM).
         """
+        if not np.isfinite(nu) or abs(nu) > 0.01:
+            raise CAMBError("RunningVacuum nu must be finite and satisfy |nu|<=0.01")
         self.nu = nu
 
 
@@ -463,7 +549,7 @@ class KEssence(DarkEnergyEqnOfState):
     Usage::
 
         pars.DarkEnergy = KEssence()
-        pars.DarkEnergy.set_params(x0=0.6)
+        pars.DarkEnergy.set_params(x0=0.500001)
     """
 
     # Cannot declare extra _fields_ here: DarkEnergyEqnOfState ends with unmapped
@@ -474,15 +560,18 @@ class KEssence(DarkEnergyEqnOfState):
 
     _methods_ = (("SetKEssenceParams", [POINTER(c_double)]),)
 
-    def set_params(self, x0=0.6):
+    def set_params(self, x0=0.500001):
         """
         Set purely-kinetic k-essence parameters.
 
-        :param x0: dimensionless kinetic term Xt = X/M^4 today; must be > 1/2
-                   (x0 -> 1/2+ approaches LCDM w=-1; larger x0 => w further from -1).
+        :param x0: dimensionless kinetic term Xt = X/M^4 today; the validated
+                   science range is 0.5 < x0 <= 0.50001
         """
-        if x0 <= 0.5:
-            raise CAMBError("KEssence x0 (= Xt today) must be > 1/2 for rho>0, cs2>0")
+        if not np.isfinite(x0) or not 0.5 < x0 <= 0.50001:
+            raise CAMBError(
+                "KEssence x0 (= Xt today) must be finite and in the validated near-Lambda range "
+                "0.5<x0<=0.50001"
+            )
         self.f_SetKEssenceParams(byref(c_double(float(x0))))
 
 
@@ -537,28 +626,32 @@ class Chaplygin(DarkEnergyEqnOfState):
         :param alpha: GCG exponent, must be >= 0 (alpha -> 0 approaches LCDM;
                       larger alpha raises the late-time sound speed cs2 = -alpha*w)
         """
+        if not np.isfinite(As) or not np.isfinite(alpha):
+            raise CAMBError("Chaplygin As and alpha must be finite")
         if not (0.0 < As < 1.0):
             raise CAMBError("Chaplygin As (= A/rho_de0^(1+alpha)) must be in (0,1)")
         if alpha < 0.0:
             raise CAMBError("Chaplygin alpha must be >= 0")
+        if alpha * As > 1.0:
+            raise CAMBError("Chaplygin requires alpha*As<=1 so the sound speed is subluminal for a<=1")
         self.f_SetChaplyginParams(byref(c_double(float(As))), byref(c_double(float(alpha))))
 
 
 @fortran_class
 class FuzzyDMField(DarkEnergyModel):
     """
-    Fuzzy/Ultralight Axion Dark Matter via Klein-Gordon background + EFA perturbations.
+    Experimental fuzzy/ultralight-axion Klein--Gordon plus EFA implementation.
 
-    Solves the KG equation for V(phi) = (1/2)m^2 phi^2 to get correct background
-    evolution (frozen w=-1 at early times, matter-like w=0 after oscillation onset).
-    After a_match (where m/H = N_match), switches to effective fluid approximation
-    with Passaglia-Hu sound speed cs2 = k^2/(4m^2 a^2 + k^2).
+    Active axion configurations are disabled pending independent validation. The
+    current implementation does not recover the requested present-day axion
+    abundance and uses inconsistent background and perturbation transition
+    times. ``f_axion=omega_axion_h2=0`` remains available as the null (Lambda)
+    regression configuration.
 
-    Placed in DarkEnergy slot. Usage::
-
-        pars.set_cosmology(omch2=0.12*(1-f_axion), ...)
-        pars.DarkEnergy = FuzzyDMField()
-        pars.DarkEnergy.set_params(m_axion=1e-22, f_axion=0.05)
+    The archived code attempts a KG background followed by an effective-fluid
+    approximation, but active use raises ``CAMBError``.
+    It is retained so the failed implementation and its null regression can be
+    audited while a reference-tested replacement is developed.
 
     References: Hu+ 2000, Hlozek+ 2015, Passaglia & Hu 2022, Marsh 2016.
     """
@@ -602,6 +695,18 @@ class FuzzyDMField(DarkEnergyModel):
         :param f_decay: decay constant [M_Pl] for cosine potential
         :param use_improved_efa: use Passaglia-Hu improved EFA corrections
         """
+        numeric = [m_axion, f_axion, omega_axion_h2, f_decay]
+        if not np.all(np.isfinite(numeric)):
+            raise CAMBError("FuzzyDMField parameters must be finite")
+        if m_axion <= 0 or not 0 <= f_axion < 1 or omega_axion_h2 < 0:
+            raise CAMBError("FuzzyDMField requires m_axion>0, 0<=f_axion<1, and omega_axion_h2>=0")
+        if N_match <= 0 or potential_type not in (1, 2) or n_potential < 1 or f_decay <= 0:
+            raise CAMBError("FuzzyDMField transition and potential parameters are outside their valid ranges")
+        if f_axion > 0 or omega_axion_h2 > 0:
+            raise CAMBError(
+                "Active FuzzyDMField configurations are disabled: the requested axion abundance and "
+                "KG-to-EFA matching have not passed independent physical validation"
+            )
         self.m_axion = m_axion
         self.f_axion = f_axion
         self.omega_axion_h2 = omega_axion_h2
@@ -618,7 +723,13 @@ class FuzzyDMField(DarkEnergyModel):
 @fortran_class
 class HorndeskiDE(DarkEnergyEqnOfState):
     """
-    Horndeski scalar-tensor gravity with alpha parameterization (QSA).
+    Experimental Horndeski-inspired alpha parameterization (QSA).
+
+    Modified-gravity configurations are disabled pending a complete scalar
+    perturbation implementation and comparison with an independent Horndeski
+    solver. Only exact LambdaCDM -- ``w=-1``, ``wa=0``, all alpha amplitudes
+    exactly zero, and ``M_star_ini=1`` -- remains available as a null regression
+    path.
 
     Implements the Bellini & Sawicki (2014) alpha parameterization:
     alpha_X(a) = alpha_X_0 * Omega_DE(a) (proportional parameterization).
@@ -652,7 +763,7 @@ class HorndeskiDE(DarkEnergyEqnOfState):
         ),
     )
 
-    def set_params(self, w=-1.0, wa=0, alpha_K=0.0, alpha_B=0.0, alpha_M=0.0, alpha_T=0.0, M_star_ini=1.0, **kwargs):
+    def set_params(self, w=-1.0, wa=0, alpha_K=0.0, alpha_B=0.0, alpha_M=0.0, alpha_T=0.0, M_star_ini=1.0):
         """
         Set Horndeski gravity parameters.
 
@@ -664,6 +775,17 @@ class HorndeskiDE(DarkEnergyEqnOfState):
         :param alpha_T: tensor speed excess amplitude
         :param M_star_ini: initial M*^2/M_Pl^2
         """
+        values = [w, wa, alpha_K, alpha_B, alpha_M, alpha_T, M_star_ini]
+        if not np.all(np.isfinite(values)):
+            raise CAMBError("HorndeskiDE parameters must be finite")
+        if M_star_ini <= 0 or 1 + alpha_T <= 0:
+            raise CAMBError("HorndeskiDE requires M_star_ini>0 and 1+alpha_T>0")
+        if (w, wa, alpha_K, alpha_B, alpha_M, alpha_T, M_star_ini) != (-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0):
+            raise CAMBError(
+                "HorndeskiDE supports only the exact LambdaCDM null configuration pending a complete "
+                "scalar-perturbation implementation and independent physical validation"
+            )
+        self.use_tabulated_w = False
         self.w = w
         self.wa = wa
         self.f_SetHorndeskiParams(

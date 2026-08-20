@@ -4,6 +4,8 @@
     use results
     use constants
     use classes
+    use config, only: GlobalError, error_unsupported_params
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
 
     ! Purely kinetic k-essence dark energy.
@@ -30,12 +32,13 @@
     ! background convention and algebraic solve).
 
     type, extends(TDarkEnergyFluid) :: TKEssence
-        real(dl) :: x0 = 0.6_dl        ! Xt today (X in M^4 units), must be > 1/2
+        real(dl) :: x0 = 0.500001_dl   ! viable near-Lambda default; Xt today must be > 1/2
         integer  :: n_tab = 4096       ! background table size (log-a grid; matches lagRamses)
         real(dl) :: cs2_0 = 0._dl      ! cs2 today (diagnostic, set in Init)
         Type(TCubicSpline) :: cs2ofa   ! rest-frame cs2 as function of log(a)
     contains
     procedure :: ReadParams => TKEssence_ReadParams
+    procedure :: Validate => TKEssence_Validate
     procedure, nopass :: PythonClass => TKEssence_PythonClass
     procedure, nopass :: SelfPointer => TKEssence_SelfPointer
     procedure :: Init => TKEssence_Init
@@ -44,6 +47,18 @@
     end type TKEssence
 
     contains
+
+    subroutine TKEssence_Validate(this, OK)
+    class(TKEssence), intent(in) :: this
+    logical, intent(inout) :: OK
+
+    call this%TDarkEnergyFluid%Validate(OK)
+    if (.not. ieee_is_finite(this%x0) .or. this%x0 <= 0.5_dl .or. this%x0 > 0.50001_dl) then
+        OK = .false.
+        write(*,*) 'KEssence x0 must satisfy 0.5 < x0 <= 0.50001.'
+    end if
+
+    end subroutine TKEssence_Validate
 
     subroutine TKEssence_SetKEssenceParams(this, x0in)
     class(TKEssence), intent(inout) :: this
@@ -60,7 +75,7 @@
     class(TIniFile), intent(in) :: Ini
 
     ! k-essence builds its own w(a)/cs2(a) tables in Init; only x0 is read.
-    this%x0 = Ini%Read_Double('kessence_x0', 0.6d0)
+    this%x0 = Ini%Read_Double('kessence_x0', 0.500001d0)
 
     end subroutine TKEssence_ReadParams
 
@@ -93,8 +108,10 @@
     real(dl) :: c0, x, targ, g, gp, dxs, lna_min, dlna, lna
     integer  :: n, i, it
 
-    if (this%x0 <= 0.5_dl) &
-        error stop 'KEssence: x0 (=Xt today) must be > 1/2 for rho>0, cs2>0'
+    if (.not. ieee_is_finite(this%x0) .or. this%x0 <= 0.5_dl .or. this%x0 > 0.50001_dl) then
+        call GlobalError('KEssence x0 must satisfy 0.5 < x0 <= 0.50001.', error_unsupported_params)
+        return
+    end if
 
     n = this%n_tab
     allocate(a(n), w(n), cs2(n))

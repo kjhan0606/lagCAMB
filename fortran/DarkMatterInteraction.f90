@@ -8,6 +8,8 @@
     type, extends(TCambComponent) :: TDarkMatterModel
         logical :: is_standard_cdm = .true.
         integer :: num_perturb_equations = 0
+        integer :: num_dm_equations = 0        ! contiguous model-specific DM equations
+        logical :: has_background_pressure = .false.
         logical :: has_cdm_velocity = .false.  ! whether CDM velocity is evolved (DM-baryon)
         integer :: num_dr_equations = 0        ! number of DR hierarchy equations (DM-DR)
     contains
@@ -23,6 +25,9 @@
     procedure :: SetBackgroundDensities => TDarkMatterModel_SetBackgroundDensities
     procedure :: ModifyNeutrinoParams => TDarkMatterModel_ModifyNeutrinoParams
     procedure :: TransferFunction => TDarkMatterModel_TransferFunction
+    procedure :: has_switch => TDarkMatterModel_has_switch
+    procedure :: Switch => TDarkMatterModel_Switch
+    procedure :: ScalarSwitchScaleFactor => TDarkMatterModel_ScalarSwitchScaleFactor
     end type TDarkMatterModel
 
     public TDarkMatterModel
@@ -83,6 +88,31 @@
     logical, intent(in), optional :: high_ktau_dr
 
     end subroutine TDarkMatterModel_PerturbationEvolve
+
+    function TDarkMatterModel_has_switch(this, a) result(has_switch)
+    class(TDarkMatterModel), intent(in) :: this
+    real(dl), intent(in) :: a
+    logical :: has_switch
+
+    has_switch = .false.
+
+    end function TDarkMatterModel_has_switch
+
+    subroutine TDarkMatterModel_Switch(this, dm_ix, a, k, z, y)
+    class(TDarkMatterModel), intent(inout) :: this
+    integer, intent(in) :: dm_ix
+    real(dl), intent(in) :: a, k, z
+    real(dl), intent(inout) :: y(:)
+
+    end subroutine TDarkMatterModel_Switch
+
+    function TDarkMatterModel_ScalarSwitchScaleFactor(this) result(a_switch)
+    class(TDarkMatterModel), intent(in) :: this
+    real(dl) :: a_switch
+
+    a_switch = 0._dl
+
+    end function TDarkMatterModel_ScalarSwitchScaleFactor
 
     subroutine TDarkMatterModel_PrintFeedback(this, FeedbackLevel)
     class(TDarkMatterModel) :: this

@@ -23,6 +23,8 @@
     use constants
     use classes
     use Interpolation
+    use config, only: GlobalError, error_unsupported_params
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
     private
 
@@ -104,6 +106,7 @@
     contains
     procedure :: Vofphi => TTrackerQuintessence_VofPhi
     procedure :: Init => TTrackerQuintessence_Init
+    procedure :: Validate => TTrackerQuintessence_Validate
     procedure :: ReadParams => TTrackerQuintessence_ReadParams
     procedure, nopass :: PythonClass => TTrackerQuintessence_PythonClass
     procedure, nopass :: SelfPointer => TTrackerQuintessence_SelfPointer
@@ -133,6 +136,7 @@
         real(dl), allocatable :: dmcorr_a(:) !exp(-beta*(phi(a)-phi0)) on the uniform ln a grid
     contains
     procedure :: Init => TCoupledQuintessence_Init
+    procedure :: Validate => TCoupledQuintessence_Validate
     procedure :: ReadParams => TCoupledQuintessence_ReadParams
     procedure, nopass :: PythonClass => TCoupledQuintessence_PythonClass
     procedure, nopass :: SelfPointer => TCoupledQuintessence_SelfPointer
@@ -145,6 +149,43 @@
 
     public TQuintessence, TEarlyQuintessence, TTrackerQuintessence, TCoupledQuintessence
     contains
+
+    logical function TrackerQuintessenceParamsValid(this)
+    class(TTrackerQuintessence), intent(in) :: this
+
+    TrackerQuintessenceParamsValid = &
+        (this%pot_type == 1 .or. this%pot_type == 2) .and. &
+        (this%ic_mode == 0 .or. this%ic_mode == 1) .and. &
+        (this%ic_mode /= 1 .or. this%pot_type == 1) .and. &
+        ieee_is_finite(this%alpha) .and. ieee_is_finite(this%lam) .and. &
+        ieee_is_finite(this%phi_ini) .and. this%alpha > 0._dl .and. this%lam > 0._dl .and. &
+        (this%ic_mode /= 0 .or. this%phi_ini > 0._dl)
+
+    end function TrackerQuintessenceParamsValid
+
+    subroutine TTrackerQuintessence_Validate(this, OK)
+    class(TTrackerQuintessence), intent(in) :: this
+    logical, intent(inout) :: OK
+
+    call this%TQuintessence%Validate(OK)
+    if (.not. TrackerQuintessenceParamsValid(this)) then
+        OK = .false.
+        write(*,*) 'TrackerQuintessence parameters are outside the supported finite ranges.'
+    end if
+
+    end subroutine TTrackerQuintessence_Validate
+
+    subroutine TCoupledQuintessence_Validate(this, OK)
+    class(TCoupledQuintessence), intent(in) :: this
+    logical, intent(inout) :: OK
+
+    call this%TTrackerQuintessence%Validate(OK)
+    if (.not. ieee_is_finite(this%beta) .or. this%beta < 0._dl .or. this%beta > 0.1_dl) then
+        OK = .false.
+        write(*,*) 'CoupledQuintessence beta must satisfy 0 <= beta <= 0.1.'
+    end if
+
+    end subroutine TCoupledQuintessence_Validate
 
     function VofPhi(this, phi, deriv)
     !Get the quintessence potential as function of phi
@@ -985,13 +1026,11 @@
 
     this%astart = 1.d-6                 !start field integration at a=1e-6 (as N-body solver)
     this%integrate_tol = 1.d-10         !tight enough for |Omega_phi/Omega_de-1| << 1e-8
-    if (this%ic_mode < 0 .or. this%ic_mode > 1) &
-        call MpiStop('TTrackerQuintessence: ic_mode must be 0 or 1')
-    if (this%ic_mode == 1 .and. this%pot_type /= 1) &
-        call MpiStop('TTrackerQuintessence: tracker ic_mode requires Ratra-Peebles pot_type=1')
-    if (this%alpha <= 0._dl .or. this%lam <= 0._dl .or. &
-        (this%ic_mode == 0 .and. this%phi_ini <= 0._dl)) &
-        call MpiStop('TTrackerQuintessence: active potential/initial parameters must be positive')
+    if (.not. TrackerQuintessenceParamsValid(this)) then
+        call GlobalError('TrackerQuintessence parameters are outside the supported finite ranges.', &
+            error_unsupported_params)
+        return
+    end if
     call this%TQuintessence%Init(State)
     call this%Tracker_solve()           !via this% so an extending type's dynamic type survives to EvolveBackground
 
@@ -1100,6 +1139,16 @@
     integer iter
     integer, parameter :: max_outer = 25
 
+    if (.not. TrackerQuintessenceParamsValid(this)) then
+        call GlobalError('CoupledQuintessence inherited tracker parameters are invalid.', &
+            error_unsupported_params)
+        return
+    end if
+    if (.not. ieee_is_finite(this%beta) .or. this%beta < 0._dl .or. this%beta > 0.1_dl) then
+        call GlobalError('CoupledQuintessence beta must satisfy 0 <= beta <= 0.1.', error_unsupported_params)
+        return
+    end if
+
     this%dmcorr_ready = .false.   !first background pass sees uncoupled CDM (hook returns 0)
     this%astart = 1.d-6
     this%integrate_tol = 1.d-10
@@ -1126,6 +1175,10 @@
         if (abs(this%phi0 - phi0_prev) < 1.d-10) exit
         phi0_prev = this%phi0
     end do
+    if (iter > max_outer) then
+        call GlobalError('CoupledQuintessence fixed-point background did not converge.', error_unsupported_params)
+        return
+    end if
 
     !delta_phi, delta_phi', plus the coupled-CDM velocity theta_c in the 3rd slot
     this%num_perturb_equations = 3

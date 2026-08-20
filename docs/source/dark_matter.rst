@@ -67,6 +67,26 @@ Warm Dark Matter
 Fuzzy Dark Matter
 -----------------
 
+``FuzzyDM`` evolves the quadratic Klein--Gordon background and two exact field
+perturbations through the frozen and early oscillatory regimes.  At the common
+physical surface ``m/H=match_ratio``, a Passaglia--Hu phase-envelope map
+initializes density and heat-flux EFA variables; exact and EFA stress-energy
+are then joined with a conservative C1 window.  Log-space shooting enforces
+the requested present-day axion fraction of the total ``omch2`` budget.
+
+Active models enforce ``1e-23 <= m_axion/eV <= 1e-21``,
+``1e-3 <= f_axion <= 0.1``, ``50 <= match_ratio <= 75``, and a Lambda
+dark-energy background.  The match-ratio scan changes the tested z=0 spectra
+by at most ``5e-5`` over the validated k ranges.  At ``f_axion=0.05``, the
+current AxiCLASS double-ratio residuals are about 1.15%, 1.11%, and 0.87% for
+``m_axion=1e-23, 1e-22, 1e-21 eV`` over ``k <= 10, 30, 50 h/Mpc``.  These are
+cross-code residuals, not an accuracy guarantee over the full abundance guard
+range.  The older DarkEnergy-slot ``FuzzyDMField`` remains disabled.
+The DarkMatter-slot result is conditionally validated only for the reported
+``z=0``, ``f_axion=0.05`` linear-power benchmarks.  The abundance interval is
+a guard rather than a precision domain, and CMB/lensing outputs have no
+independent exact-solver comparison yet.
+
 .. autoclass:: camb.dark_matter.FuzzyDM
    :show-inheritance:
    :members:

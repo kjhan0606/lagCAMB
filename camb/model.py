@@ -342,8 +342,8 @@ class MuSigmaMGParams(CAMB_Structure):
         table is treated as a constant mu.
 
         Note the table is process-global state (mirrors DarkEnergy SetwTable splines):
-        it affects every subsequent calculation until cleared. Use :meth:`clear_tables`
-        (or pass empty arrays) to return to the analytic path.
+        it affects every subsequent calculation until cleared. Use :meth:`clear_tables`,
+        select a named MG model, or call :func:`camb.free_global_memory` to discard it.
 
         :param a: array of scale factors, strictly increasing and > 0
         :param mu: array of mu(a) values (same length as a)
@@ -374,7 +374,7 @@ class MuSigmaMGParams(CAMB_Structure):
         return self
 
     def clear_tables(self):
-        """Drop any tabulated mu(a)/Sigma(a) and return to the analytic path."""
+        """Drop process-global mu(a)/Sigma(a) tables and return to the analytic path."""
         _MuSigmaMG_ClearTables()
         return self
 
@@ -420,6 +420,7 @@ class MuSigmaMGParams(CAMB_Structure):
             raise CAMBValueError("set_fR: fR0 must be non-zero (use clear_MG_model() for GR)")
         if n <= 0:
             raise CAMBValueError("set_fR: n must be > 0")
+        self.clear_tables()
         self.model = 1
         self.fR0 = abs(fR0)
         self.fR_n = n
@@ -450,6 +451,7 @@ class MuSigmaMGParams(CAMB_Structure):
             Omega_rc = 1.0 / (4.0 * H0rc**2)
         if Omega_rc <= 0:
             raise CAMBValueError("set_nDGP: Omega_rc must be > 0")
+        self.clear_tables()
         self.model = 2
         self.Omega_rc = Omega_rc
         self.is_active = True
@@ -476,6 +478,7 @@ class MuSigmaMGParams(CAMB_Structure):
             raise CAMBValueError("set_symmetron: a_ssb must be > 0")
         if L_Mpc <= 0:
             raise CAMBValueError("set_symmetron: L_Mpc must be > 0")
+        self.clear_tables()
         self.model = 3
         self.a_ssb = a_ssb
         self.beta_sym = beta
@@ -484,7 +487,8 @@ class MuSigmaMGParams(CAMB_Structure):
         return self
 
     def clear_MG_model(self):
-        """Return to GR / the phenomenological mu-Sigma path (model = 0)."""
+        """Return to GR / the phenomenological mu-Sigma path and discard process-global tables."""
+        self.clear_tables()
         self.model = 0
         self.fR0 = 0.0
         self.Omega_rc = 0.0
@@ -1367,7 +1371,9 @@ class CAMBparams(F2003Class):
         """
         Set custom phase-space distribution for a neutrino mass eigenstate.
         The PSD will be normalized internally so that ∫q³f₀dq matches the
-        standard Fermi-Dirac value; only the shape matters.
+        standard Fermi-Dirac value; only the shape matters. This setting is
+        process-global. Call :meth:`clear_ncdm_psd` or
+        :func:`camb.free_global_memory` before an independent standard-PSD run.
 
         :param nu_index: 0-based neutrino eigenstate index
         :param q: array of comoving momenta in units of k_B*T_nu/c (ascending)
@@ -1385,7 +1391,7 @@ class CAMBparams(F2003Class):
 
     @staticmethod
     def clear_ncdm_psd():
-        """Clear all custom neutrino PSDs, reverting to standard Fermi-Dirac."""
+        """Clear all process-global custom neutrino PSDs, reverting to standard Fermi-Dirac."""
         _ClearCustomNuPSD()
 
 

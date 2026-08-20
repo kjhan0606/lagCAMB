@@ -23,6 +23,19 @@ Input parameter model
    :alt: mu-Sigma MG vs LCDM
    :width: 100%
 
+Global table lifecycle
+----------------------
+
+Tabulated mu(a)/Sigma(a) functions and custom neutrino phase-space
+distributions are process-global Fortran state. Named MG setters
+(:meth:`.MuSigmaMGParams.set_fR`, :meth:`.MuSigmaMGParams.set_nDGP`, and
+:meth:`.MuSigmaMGParams.set_symmetron`) discard stale mu/Sigma tables.
+Use :meth:`.MuSigmaMGParams.clear_tables`,
+:meth:`.MuSigmaMGParams.clear_MG_model`,
+:meth:`.CAMBparams.clear_ncdm_psd`, or :func:`camb.free_global_memory` at
+independent-run boundaries. The last option also releases thermal-neutrino
+interpolation and perturbation caches.
+
 f(R) Gravity (Hu--Sawicki)
 --------------------------
 

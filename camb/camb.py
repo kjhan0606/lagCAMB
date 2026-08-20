@@ -476,8 +476,11 @@ def free_global_memory():
     """
     Clean up all globally allocated Fortran memory.
 
-    This function calls various Fortran cleanup routines to deallocate
-    global allocatable arrays, particularly useful for memory leak testing.
+    This function calls the Fortran cleanup routines for global allocatable
+    arrays, including tabulated mu/Sigma modified-gravity functions, custom
+    neutrino phase-space distributions, and thermal-neutrino interpolation
+    caches. It is useful for repeated independent calculations and memory
+    leak testing in one Python process.
     """
     camblib.__camb_MOD_camb_freeglobalmemory()
 

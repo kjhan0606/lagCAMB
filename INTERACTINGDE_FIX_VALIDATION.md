@@ -126,12 +126,36 @@ inert; the CPL w=-0.9 case with xi=+0.03 also stayed finite/positive). **PASS.**
 
 ## Caveats
 
+### Science-use quarantine added on 2026-08-20
+
+The public Python, low-level Fortran, and INI entry points now accept only
+`interaction_type=1`. Types 2 and 3 fail before a background or perturbation
+result can be generated because their background continuity equations are
+incomplete. Previously generated type-2 and type-3 artifacts are nonphysical
+diagnostics and must not be used for inference.
+
+The IDE perturbation system has no PPF prescription for phantom evolution or a
+crossing of `w=-1`. The exact `w=-1, wa=0` case remains supported to preserve the
+validated type-1 and LCDM limits. Every other CPL or tabulated input must satisfy
+`1+w(a)>1e-6` over the full spline domain. The stored velocity is
+`(1+w)v_de`, and the validated sound-speed configuration is `cs2_ide=1`.
+
+The 2026-08-20 quarantine regression passed the Python setter, direct
+constructor, direct-field, low-level IDE setter, and low-level w-table bypass
+cases. It also covered spline extrema and endpoint rejection, table-to-CPL state
+reset, `CAMBparams.validate()`, invalid type-2/type-3 and phantom/crossing INI
+inputs, and a valid type-1 INI background run. The complete
+`camb.tests.camb_test` suite passed 19 tests in one process after these additions.
+Four pre-patch and post-patch type-1 arrays were bitwise identical. Their SHA-256 digests were
+`1de22c8c...39d`, `75b556ec...33c`, `8c57afac...fc5`, and
+`05017761...9ee` for the LCDM limit, positive coupling, negative coupling, and
+safe CPL cases, respectively.
+
 - **Sigma8 direction** contradicts the brief's naive expectation (xi>0 lowers, not raises, sigma8)
   — this is correct given the documented Q sign + CAMB present-day normalization; see Test 3.
-- Type 2 (`Q=xi H rho_c`) and type 3 (`Q=xi H (rho_c+rho_de)`) backgrounds remain approximate:
-  bug-1's `/a^2` is fixed for type 3, but their CDM-background excess is **not** applied
-  (`CDM_BackgroundCorrection` returns 0 for interaction_type != 1). Only type 1 (the campaign's
-  target and the default) is made exact. Their perturbation hooks are unchanged.
+- Type 2 (`Q=xi H rho_c`) and type 3 (`Q=xi H (rho_c+rho_de)`) remain in the
+  source as unreachable implementation scaffolding. All supported entry points
+  reject them, including the `xi=0` case.
 - 21cm-window CDM densities (`results.f90:2012,2512`, `Do21cm` only) are not corrected — outside
   this validation's scope (linear matter power, no 21cm windows).
 - CPL/tabulated CDM-excess integral is a 4096-pt trapezoid (log-a); constant-w uses the exact

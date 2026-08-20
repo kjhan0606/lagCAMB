@@ -4,6 +4,8 @@
     use results
     use constants
     use classes
+    use config, only: GlobalError, error_unsupported_params
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     implicit none
 
     private
@@ -28,6 +30,7 @@
         real(dl), allocatable, private :: Sigma_tab(:), dSigma_tab(:)
     contains
         procedure :: Init => THorndeskiDE_Init
+        procedure :: Validate => THorndeskiDE_Validate
         procedure :: SetHorndeskiParams => THorndeskiDE_SetHorndeskiParams
         procedure :: PrintFeedback => THorndeskiDE_PrintFeedback
         procedure, nopass :: PythonClass => THorndeskiDE_PythonClass
@@ -44,6 +47,29 @@
     public THorndeskiDE
 
     contains
+
+    subroutine THorndeskiDE_Validate(this, OK)
+    class(THorndeskiDE), intent(in) :: this
+    logical, intent(inout) :: OK
+    logical :: finite_params
+
+    call this%TDarkEnergyEqnOfState%Validate(OK)
+    finite_params = ieee_is_finite(this%w_lam) .and. ieee_is_finite(this%wa) .and. &
+        ieee_is_finite(this%alpha_K_0) .and. ieee_is_finite(this%alpha_B_0) .and. &
+        ieee_is_finite(this%alpha_M_0) .and. ieee_is_finite(this%alpha_T_0) .and. &
+        ieee_is_finite(this%M_star_ini)
+    if (.not. finite_params .or. this%M_star_ini <= 0._dl .or. 1._dl + this%alpha_T_0 <= 0._dl) then
+        OK = .false.
+        write(*,*) 'HorndeskiDE requires finite parameters, M_star_ini>0, and 1+alpha_T>0.'
+    end if
+    if (this%w_lam /= -1._dl .or. this%wa /= 0._dl .or. this%alpha_K_0 /= 0._dl .or. &
+        this%alpha_B_0 /= 0._dl .or. this%alpha_M_0 /= 0._dl .or. this%alpha_T_0 /= 0._dl .or. &
+        this%M_star_ini /= 1._dl) then
+        OK = .false.
+        write(*,*) 'HorndeskiDE supports only the exact LambdaCDM null configuration.'
+    end if
+
+    end subroutine THorndeskiDE_Validate
 
     function THorndeskiDE_PythonClass()
     character(LEN=:), allocatable :: THorndeskiDE_PythonClass
@@ -237,6 +263,14 @@
     integer, parameter :: n_table = 500
     real(dl), parameter :: lna_min = -14._dl  ! a ~ 8e-7
     real(dl), parameter :: lna_max = 0._dl    ! a = 1
+
+    if (this%w_lam /= -1._dl .or. this%wa /= 0._dl .or. this%alpha_K_0 /= 0._dl .or. &
+        this%alpha_B_0 /= 0._dl .or. this%alpha_M_0 /= 0._dl .or. this%alpha_T_0 /= 0._dl .or. &
+        this%M_star_ini /= 1._dl) then
+        call GlobalError('HorndeskiDE supports only the exact LambdaCDM null configuration.', &
+            error_unsupported_params)
+        return
+    end if
 
     ! Initialize parent (sets w, wa, is_cosmological_constant, etc.)
     call this%TDarkEnergyEqnOfState%Init(State)

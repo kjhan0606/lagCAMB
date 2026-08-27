@@ -45,6 +45,7 @@ from .dark_matter import (
     DMBaryonScattering,
     DMNeutrinoScattering,
     FuzzyDM,
+    TransientGDM,
     WarmDM,
 )
 from .initialpower import InitialPowerLaw, SplinedInitialPower

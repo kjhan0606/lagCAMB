@@ -17,22 +17,28 @@ delta_neutrino           5     :math:`\Delta_r`, for massless neutrinos
 delta_nu                 6     :math:`\Delta_\nu` for massive neutrinos
 delta_tot                7     :math:`\frac{\rho_c\Delta_c+\rho_b\Delta_b+\rho_\nu\Delta_\nu}{\rho_c+\rho_b+\rho_\nu}`,
                                CDM+baryons+massive neutrino density
-delta_nonu               8     :math:`\frac{\rho_c\Delta_c+\rho_b\Delta_b}{\rho_b+\rho_c}`, CDM+baryon  density
+delta_nonu               8     Particle-matter density excluding massive neutrinos: baryons plus all DM
+                               subcomponents (including ``TransientGDM`` ``X`` when active)
 delta_tot_de             9     :math:`\frac{\rho_c\Delta_c+\rho_b\Delta_b+\rho_\nu\Delta_\nu +\rho_{ de}\Delta_{de}}{\rho_c+\rho_b+\rho_\nu}`,
                                CDM+baryons+massive neutrinos+ dark energy (numerator only)  density
 Weyl                    10     :math:`k^2\Psi\equiv k^2(\phi+\psi)/2`,
                                the Weyl potential scaled by :math:`k^2` to scale in :math:`k` like a density.
 v_newtonian_cdm         11     :math:`-v_{N,c}\, k/{\cal H}` (where :math:`v_{N,c}` is the
-                               Newtonian-gauge CDM velocity)
+                               Newtonian-gauge CDM velocity). For ``TransientGDM`` this is the
+                               mass-weighted total-DM velocity used by one-species DMO initial conditions.
 v_newtonian_baryon      12     :math:`-v_{N,b}\,k/{\cal H}` (Newtonian-gauge baryon velocity :math:`v_{N,b}`)
 v_baryon_cdm            13     :math:`v_b-v_c`, relative baryon-CDM velocity
+delta_dm_dr             14     Interacting dark-matter density perturbation
+delta_dark_rad          15     Dark-radiation density perturbation
+v_newtonian_gdm         16     :math:`-v_{N,X}\,k/{\cal H}`, the separately evolved
+                               ``TransientGDM`` component velocity (zero for other models)
 =====================  ======  =====================================================================
 
 The number here corresponds to a corresponding numerical index, in Fortran these are the same as *model.name*,
 where *name* are the Transfer_xxx variable names:
 Transfer_kh=1,Transfer_cdm=2, Transfer_b=3, Transfer_g=4, Transfer_r=5, Transfer_nu=6, Transfer_tot=7,
 Transfer_nonu=8, Transfer_tot_de=9, Transfer_Weyl=10, Transfer_Newt_vel_cdm=11, Transfer_Newt_vel_baryon=12,
-Transfer_vel_baryon_cdm = 13.
+Transfer_vel_baryon_cdm=13, Transfer_dm_dr=14, Transfer_dark_rad=15, Transfer_gdm_velocity=16.
 
 So for example, requesting var1='delta_b', var2='Weyl' or alternatively var1=model.Transfer_b, var2=model.Transfer_Weyl
 would get the power spectrum for the cross-correlation of the baryon density with the Weyl potential.
@@ -62,7 +68,8 @@ Transfer_vnewt              5     :math:`r_\tau kv_{N,b}/\mathcal{H}`, 21cm Newt
 Transfer_Tmat               6     :math:`\Delta_{T_m}`, matter temperature perturbation
 Transfer_tot                7     :math:`\frac{\rho_c\Delta_c+\rho_b\Delta_b+\rho_\nu\Delta_\nu}{\rho_c+\rho_b+\rho_\nu}`,
                                   CDM+baryons+massive neutrino density
-Transfer_nonu               8     :math:`\frac{\rho_c\Delta_c+\rho_b\Delta_b}{\rho_b+\rho_c}`, CDM+baryon  density
+Transfer_nonu               8     Particle-matter density excluding massive neutrinos: baryons plus all DM
+                                  subcomponents
 Transfer_tot_de             9     :math:`\frac{\rho_c\Delta_c+\rho_b\Delta_b+\rho_\nu\Delta_\nu +\rho_{ de}\Delta_{de}}{\rho_c+\rho_b+\rho_\nu}`,
                                   CDM+baryons+massive neutrinos+ dark energy (numerator only)  density
 Transfer_Weyl              10     :math:`k^2\Psi\equiv k^2(\phi+\psi)/2`,
@@ -71,6 +78,9 @@ Transfer_Newt_vel_cdm      11     :math:`-v_{N,c}\, k/{\cal H}` (where :math:`v_
                                   Newtonian-gauge CDM velocity)
 Transfer_Newt_vel_baryon   12     :math:`-v_{N,b}\,k/{\cal H}` (Newtonian-gauge baryon velocity :math:`v_{N,b}`)
 Transfer_vel_baryon_cdm    13     :math:`v_b-v_c`, relative baryon-CDM velocity
+Transfer_dm_dr             14     Interacting dark-matter density perturbation
+Transfer_dark_rad          15     Dark-radiation density perturbation
+Transfer_gdm_velocity      16     :math:`-v_{N,X}\,k/{\cal H}`, separate ``TransientGDM`` velocity
 ========================  ======  =====================================================================
 
 If use_21cm_mK is set the 21cm results are multiplied by :math:`T_b` to give results in mK units.

@@ -3114,20 +3114,21 @@
         Transfer_Newt_vel_cdm=11, Transfer_Newt_vel_baryon=12,   & ! -k v_Newtonian/H
         Transfer_vel_baryon_cdm = 13, & !relative velocity of baryons and CDM
         Transfer_dm_dr = 14, & !interacting DM (DM-DR coupled) density perturbation
-        Transfer_dark_rad = 15 !dark radiation density perturbation
+        Transfer_dark_rad = 15, & !dark radiation density perturbation
+        Transfer_gdm_velocity = 16 !Newtonian velocity of a separate GDM component
     !Sources
     !Alternatively for 21cm
     integer, parameter :: Transfer_monopole=4, Transfer_vnewt=5, Transfer_Tmat = 6
 
-    integer, parameter :: Transfer_max = Transfer_dark_rad
+    integer, parameter :: Transfer_max = Transfer_gdm_velocity
     character(LEN=name_tag_len) :: Transfer_name_tags(Transfer_max-1) = &
         ['CDM     ', 'baryon  ', 'photon  ', 'nu      ', 'mass_nu ', 'total   ', &
         'no_nu   ', 'total_de', 'Weyl    ', 'v_CDM   ', 'v_b     ', 'v_b-v_c ', &
-        'dm_dr   ', 'dark_rad']
+        'dm_dr   ', 'dark_rad', 'v_gdm   ']
     character(LEN=name_tag_len) :: Transfer21cm_name_tags(Transfer_max-1) = &
         ['CDM      ', 'baryon   ', 'photon   ', 'monopole ', 'v_newt   ', 'delta_T_g', &
         'no_nu    ', 'total_de ', 'Weyl     ', 'v_CDM    ', 'v_b      ', 'v_b-v_c  ', &
-        'dm_dr    ', 'dark_rad ']
+        'dm_dr    ', 'dark_rad ', 'v_gdm    ']
 
     logical :: transfer_interp_matterpower  = .true. !output regular grid in log k
     !set to false to output calculated values for later interpolation

@@ -372,6 +372,57 @@ class FuzzyDM(DarkMatterModel):
 
 
 @fortran_class
+class TransientGDM(DarkMatterModel):
+    """Transient early-dark-energy-like generalized dark matter.
+
+    A fraction ``f_X`` of the total density supplied through ``omch2`` follows
+    the Gaussian equation-of-state dip and scale-dependent rest-frame sound
+    speed of Bhattacharjee et al. (2026), arXiv:2608.20288. The component
+    returns to pressureless matter after the transient while retaining its own
+    density and velocity perturbations.
+    """
+
+    _fields_ = (
+        ("f_X", c_double, "Present fraction of total omch2 assigned to X"),
+        ("w_p", c_double, "Minimum transient equation of state"),
+        ("kappa0_hmpc", c_double, "Comoving regulator scale at a_f [h/Mpc]"),
+        ("a_i", c_double, "Start of the +/-3-sigma transient interval"),
+        ("a_f", c_double, "End of the +/-3-sigma transient interval"),
+    )
+
+    _fortran_class_module_ = "TransientGDM"
+    _fortran_class_name_ = "TTransientGDM"
+
+    def set_params(
+        self,
+        f_X=0.00155,
+        w_p=-0.45,
+        kappa0_hmpc=6.4,
+        a_i=1.46e-7,
+        a_f=1.46e-5,
+    ):
+        self.f_X = f_X
+        self.w_p = w_p
+        self.kappa0_hmpc = kappa0_hmpc
+        self.a_i = a_i
+        self.a_f = a_f
+        self.validate_params()
+        return self
+
+    def validate_params(self):
+        from .baseconfig import CAMBError
+
+        if not 0 <= self.f_X < 1:
+            raise CAMBError("TransientGDM f_X must be in [0, 1)")
+        if not -1 < self.w_p <= 0:
+            raise CAMBError("TransientGDM w_p must be in (-1, 0]")
+        if self.kappa0_hmpc <= 0:
+            raise CAMBError("TransientGDM kappa0_hmpc must be positive")
+        if not 0 < self.a_i < self.a_f < 1:
+            raise CAMBError("TransientGDM requires 0 < a_i < a_f < 1")
+
+
+@fortran_class
 class MultiInteractingDM(DarkMatterModel):
     """
     Multi-Interacting DM: single DM fluid with up to 3 simultaneous channels.
@@ -634,6 +685,7 @@ F2003Class._class_names.update(
         "dm_neutrino": DMNeutrinoScattering,
         "warm_dm": WarmDM,
         "fuzzy_dm": FuzzyDM,
+        "transient_gdm": TransientGDM,
         "dm_photon": DMPhotonScattering,
         "multi_idm": MultiInteractingDM,
         "ethos_transfer_murgia": ETHOSTransferMurgia,

@@ -23,6 +23,9 @@
     procedure :: SetBackgroundDensities => TDarkMatterModel_SetBackgroundDensities
     procedure :: ModifyNeutrinoParams => TDarkMatterModel_ModifyNeutrinoParams
     procedure :: TransferFunction => TDarkMatterModel_TransferFunction
+    procedure :: NewtonianVelocityTransfer => TDarkMatterModel_NewtonianVelocityTransfer
+    procedure :: ComponentNewtonianVelocityTransfer => TDarkMatterModel_ComponentNewtonianVelocityTransfer
+    procedure :: NonNuDensityTransfer => TDarkMatterModel_NonNuDensityTransfer
     end type TDarkMatterModel
 
     public TDarkMatterModel
@@ -140,5 +143,42 @@
     real(dl) :: Tk
     Tk = 1._dl
     end function TDarkMatterModel_TransferFunction
+
+    function TDarkMatterModel_NewtonianVelocityTransfer(this, a, k, adotoa, sigma, ay, vc_ix) result(Tv)
+    ! Newtonian-gauge velocity transfer written to the standard CAMB v_cdm
+    ! column. Models with a pressureless subcomponent velocity may override
+    ! this with the mass-weighted total-DM velocity needed by DMO ICs.
+    class(TDarkMatterModel), intent(in) :: this
+    real(dl), intent(in) :: a, k, adotoa, sigma
+    real(dl), intent(in) :: ay(*)
+    integer, intent(in) :: vc_ix
+    real(dl) :: Tv
+
+    Tv = -k * sigma / adotoa
+    end function TDarkMatterModel_NewtonianVelocityTransfer
+
+    function TDarkMatterModel_ComponentNewtonianVelocityTransfer(this, a, k, adotoa, sigma, ay, vc_ix) result(Tv)
+    ! Optional Newtonian velocity of a separately evolved DM subcomponent.
+    class(TDarkMatterModel), intent(in) :: this
+    real(dl), intent(in) :: a, k, adotoa, sigma
+    real(dl), intent(in) :: ay(*)
+    integer, intent(in) :: vc_ix
+    real(dl) :: Tv
+
+    Tv = 0._dl
+    end function TDarkMatterModel_ComponentNewtonianVelocityTransfer
+
+    function TDarkMatterModel_NonNuDensityTransfer(this, a, grhob_t, grhodm_t, clxb, clxc, ay, dm_ix) result(Tdelta)
+    ! Density transfer of the particle species (baryons plus all DM), excluding
+    ! massive neutrinos. Models with a separately evolved DM fraction override
+    ! this to include that component in the mass-weighted density.
+    class(TDarkMatterModel), intent(in) :: this
+    real(dl), intent(in) :: a, grhob_t, grhodm_t, clxb, clxc
+    real(dl), intent(in) :: ay(*)
+    integer, intent(in) :: dm_ix
+    real(dl) :: Tdelta
+
+    Tdelta = (grhob_t * clxb + grhodm_t * clxc) / (grhob_t + grhodm_t)
+    end function TDarkMatterModel_NonNuDensityTransfer
 
     end module DarkMatterInteraction

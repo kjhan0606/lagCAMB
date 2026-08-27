@@ -101,12 +101,15 @@ class MatterTransferData:
     - Transfer_r = 5 (massless neutrinos)
     - Transfer_nu = 6 (massive neutrinos)
     - Transfer_tot = 7 (total matter)
-    - Transfer_nonu = 8 (total matter excluding neutrinos)
+    - Transfer_nonu = 8 (particle matter: baryons plus all DM, excluding massive neutrinos)
     - Transfer_tot_de = 9 (total including dark energy perturbations)
     - Transfer_Weyl = 10 (Weyl potential)
     - Transfer_Newt_vel_cdm = 11 (Newtonian CDM velocity)
     - Transfer_Newt_vel_baryon = 12 (Newtonian baryon velocity)
     - Transfer_vel_baryon_cdm = 13 (relative baryon-cdm velocity)
+    - Transfer_dm_dr = 14 (interacting dark-matter density)
+    - Transfer_dark_rad = 15 (dark-radiation density)
+    - Transfer_gdm_velocity = 16 (separate TransientGDM component velocity)
 
 
     :ivar nq:  number of q modes calculated

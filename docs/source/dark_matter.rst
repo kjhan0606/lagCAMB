@@ -75,6 +75,31 @@ Fuzzy Dark Matter
    :alt: FuzzyDM vs LCDM
    :width: 100%
 
+Transient Generalized Dark Matter
+---------------------------------
+
+.. autoclass:: camb.dark_matter.TransientGDM
+   :show-inheritance:
+   :members:
+
+``TransientGDM`` implements the phenomenological model of Bhattacharjee et
+al. (2026), arXiv:2608.20288. A fraction ``f_X`` of ``omch2`` undergoes a
+Gaussian negative-``w`` transient and evolves separate density and velocity
+perturbations with a scale-dependent rest-frame sound speed. The ``f_X=0``
+and ``w_p=0`` limits are standard CDM. This implementation is a Paper-Ib pilot
+and should not be used for precision inference before its independent CLASS
+and initial-condition transfer validations are complete.
+
+For this model the standard CAMB ``v_cdm`` transfer column is deliberately the
+mass-weighted total-DM Newtonian velocity, including the residual ``X``
+velocity. This is the column consumed by LagMUSIC for a one-species DMO load;
+it must not be interpreted as the velocity of the unmodified CDM component
+alone. The additional ``v_newtonian_gdm`` transfer column exposes the
+Newtonian velocity of ``X`` for the bounded two-species validation.
+Likewise, ``delta_nonu`` contains baryons plus both ordinary DM and ``X`` but
+excludes massive neutrinos. It is the particle-density transfer when massive
+neutrinos are retained as a separate linear-response component.
+
 DM--Photon Scattering
 ---------------------
 

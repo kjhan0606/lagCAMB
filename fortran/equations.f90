@@ -2303,7 +2303,7 @@
 
     real(dl) dgq,grhob_t,grhor_t,grhoc_t,grhog_t,grhov_t,grhonu_t,sigma,polter
     real(dl) w_dark_energy_t !equation of state of dark energy
-    real(dl) gpres_noDE !Pressure with matter and radiation, no dark energy
+    real(dl) gpres_noDE, gpres_dm !Pressure with matter and radiation, no dark energy
     real(dl) qgdot,qrdot,pigdot,pirdot,vbdot,dgrho,adotoa
     real(dl) a,a2,z,clxc,clxb,vb,clxg,qg,pig,clxr,qr,pir
     real(dl) E2, dopacity
@@ -2349,12 +2349,13 @@
 
     grhob_t=State%grhob/a
     grhoc_t=State%grhoc/a
+    gpres_dm=0._dl
     grhor_t=State%grhornomass/a2
     grhog_t=State%grhog/a2
 
     ! Allow DarkMatter model to modify CDM background density (e.g. DecayingDM)
     if (allocated(State%CP%DarkMatter)) then
-        call State%CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t)
+        call State%CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t, gpres_dm)
     end if
     ! Interacting DE (type 1): CDM background gains the dark-sector energy exchange
     ! (zero for non-interacting DE, so LCDM/xi=0 is unchanged and bit-exact).
@@ -2382,7 +2383,7 @@
 
     grho_matter=grhonu_t+grhob_t+grhoc_t
     grho = grho_matter+grhor_t+grhog_t+grhov_t
-    gpres_noDE = gpres_nu + (grhor_t + grhog_t)/3
+    gpres_noDE = gpres_nu + (grhor_t + grhog_t)/3 + gpres_dm
 
     ! Add DM-DR background densities
     if (.not. EV%is_standard_cdm) then
@@ -3148,11 +3149,24 @@
             EV%OutputTransfer(Transfer_r) = clxr
             EV%OutputTransfer(Transfer_nu) = clxnu
             EV%OutputTransfer(Transfer_tot) =  dgrho_matter/grho_matter !includes neutrinos
-            EV%OutputTransfer(Transfer_nonu) = (grhob_t*clxb+grhoc_t*clxc)/(grhob_t + grhoc_t)
+            if (allocated(State%CP%DarkMatter)) then
+                EV%OutputTransfer(Transfer_nonu) = &
+                    State%CP%DarkMatter%NonNuDensityTransfer(&
+                    a, grhob_t, grhoc_t, clxb, clxc, ay, EV%dm_ix)
+            else
+                EV%OutputTransfer(Transfer_nonu) = &
+                    (grhob_t*clxb+grhoc_t*clxc)/(grhob_t + grhoc_t)
+            end if
             EV%OutputTransfer(Transfer_tot_de) =  dgrho/grho_matter
             !Transfer_Weyl is k^2Phi, where Phi is the Weyl potential
             EV%OutputTransfer(Transfer_Weyl) = k2*phi
-            EV%OutputTransfer(Transfer_Newt_vel_cdm)=  -k*sigma/adotoa
+            if (allocated(State%CP%DarkMatter)) then
+                EV%OutputTransfer(Transfer_Newt_vel_cdm) = &
+                    State%CP%DarkMatter%NewtonianVelocityTransfer(&
+                    a, k, adotoa, sigma, ay, EV%vc_ix)
+            else
+                EV%OutputTransfer(Transfer_Newt_vel_cdm)= -k*sigma/adotoa
+            end if
             EV%OutputTransfer(Transfer_Newt_vel_baryon) = -k*(vb + sigma)/adotoa
             EV%OutputTransfer(Transfer_vel_baryon_cdm) = vb
             ! DM-DR transfer functions
@@ -3165,6 +3179,13 @@
                 EV%OutputTransfer(Transfer_dark_rad) = ay(EV%dr_ix)
             else
                 EV%OutputTransfer(Transfer_dark_rad) = 0
+            end if
+            if (allocated(State%CP%DarkMatter)) then
+                EV%OutputTransfer(Transfer_gdm_velocity) = &
+                    State%CP%DarkMatter%ComponentNewtonianVelocityTransfer(&
+                    a, k, adotoa, sigma, ay, EV%vc_ix)
+            else
+                EV%OutputTransfer(Transfer_gdm_velocity) = 0
             end if
             if (State%CP%do21cm) then
                 Tspin = State%CP%Recomb%T_s(a)
@@ -3282,7 +3303,7 @@
     real(dl) ep,tau,grho,rhopi,cs2,opacity,gpres
     logical finished_tightcoupling
     real(dl), dimension(:),pointer :: neut,neutprime,E,B,Eprime,Bprime
-    real(dl)  grhob_t,grhor_t,grhoc_t,grhog_t,grhov_t,polter
+    real(dl)  grhob_t,grhor_t,grhoc_t,grhog_t,grhov_t,polter,gpres_dm
     real(dl) sigma, qg,pig, qr, vb, rhoq, vbdot, photbar, pb43
     real(dl) k,k2,a,a2, adotdota
     real(dl) pir,adotoa
@@ -3322,17 +3343,18 @@
     ! Also calculate gpres: 8*pi*p*a**2
     grhob_t=State%grhob/a
     grhoc_t=State%grhoc/a
+    gpres_dm=0._dl
     grhor_t=State%grhornomass/a2
     grhog_t=State%grhog/a2
     if (allocated(CP%DarkMatter)) then
-        call CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t)
+        call CP%DarkMatter%BackgroundDensityAndPressure(State%grhoc, a, grhoc_t, gpres_dm)
     end if
     ! Interacting DE (type 1): CDM background gains the dark-sector energy exchange
     grhoc_t = grhoc_t + CP%DarkEnergy%CDM_BackgroundCorrection(State%grhoc, State%grhov, a)
     call CP%DarkEnergy%BackgroundDensityAndPressure(State%grhov, a, grhov_t, w_dark_energy_t)
 
     grho=grhob_t+grhoc_t+grhor_t+grhog_t+grhov_t
-    gpres=(grhog_t+grhor_t)/3._dl+grhov_t*w_dark_energy_t
+    gpres=(grhog_t+grhor_t)/3._dl+grhov_t*w_dark_energy_t+gpres_dm
 
     adotoa=sqrt(grho/3._dl)
     adotdota=(adotoa*adotoa-gpres)/2

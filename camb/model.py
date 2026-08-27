@@ -56,7 +56,8 @@ Transfer_Newt_vel_baryon = 12
 Transfer_vel_baryon_cdm = 13
 Transfer_dm_dr = 14
 Transfer_dark_rad = 15
-Transfer_max = Transfer_dark_rad
+Transfer_gdm_velocity = 16
+Transfer_max = Transfer_gdm_velocity
 
 # for 21cm case
 Transfer_monopole = 4
@@ -101,6 +102,7 @@ transfer_names = [
     "v_baryon_cdm",
     "delta_dm_dr",
     "delta_dark_rad",
+    "v_newtonian_gdm",
 ]
 
 evolve_names = transfer_names + [

@@ -80,3 +80,15 @@ The native CLI regression checks the zero-coupling LCDM limit and finite output
 at a nonzero type-1 coupling. The model's existing approximation and stability
 limits still apply; this interface does not validate every parameter choice or
 interaction type.
+
+InteractingDE phantom-side zero-coupling regression
+-------------------------------------------------
+
+The IDE perturbation state stores ``(1+w)*v_de``. Recovering ``v_de`` must divide
+by a signed ``1+w`` (with a magnitude floor near zero), not by ``abs(1+w)``.
+The latter reverses velocity terms for constant phantom ``w<-1`` and can make
+the uncoupled model fail with DVERK error -3. The native CLI regression compares
+total-matter transfers against the separately implemented fluid at ``w=-1``,
+``-0.9`` and ``-1.1``, all at zero coupling. This checks the uncoupled limit;
+it does not certify the interacting perturbation prescription against an
+independent IDE solver.

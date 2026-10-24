@@ -302,7 +302,7 @@
     real(dl), intent(in) :: a, adotoa, w, k, z, y(:)
     integer, intent(in) :: w_ix
     real(dl) :: Hv3_over_k, Q_over_rho_de, delta_de, v_de_1pw
-    real(dl) :: cs2, loga
+    real(dl) :: cs2, loga, onepw_safe
 
     if (this%num_perturb_equations == 0) return
 
@@ -310,7 +310,9 @@
     v_de_1pw = y(w_ix + 1)  ! (1+w)*v_de
     cs2 = this%cs2_ide
 
-    Hv3_over_k = 3._dl * adotoa * v_de_1pw / k / max(abs(1._dl + w), 1e-6_dl)
+    ! y(w_ix+1)=(1+w)*v_de: preserve the phantom-side sign when recovering v_de.
+    onepw_safe = sign(max(abs(1._dl + w), 1e-6_dl), 1._dl + w)
+    Hv3_over_k = 3._dl * adotoa * v_de_1pw / k / onepw_safe
 
     ! Compute Q/(rho_de * H) = xi for type 1
     ! The perturbation equations follow Valiviita+ 2008, Gavela+ 2009
@@ -338,7 +340,7 @@
     !   Additional: +xi*H*(delta_c - delta_de) where delta_c comes from constraint
     !   At leading order, the xi terms modify the effective w evolution
     ayprime(w_ix) = -3._dl * adotoa * (cs2 - w) * (delta_de + (1._dl + w) * Hv3_over_k) &
-        - (1._dl + w) * k * v_de_1pw / max(abs(1._dl + w), 1e-6_dl) &
+        - (1._dl + w) * k * v_de_1pw / onepw_safe &
         - (1._dl + w) * k * z
 
     ! Add w derivative term for wa parametrization

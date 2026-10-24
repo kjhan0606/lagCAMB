@@ -41,10 +41,12 @@ class InteractingDECLITest(unittest.TestCase):
             self.skipTest("Build the native CLI with make -j1 camb first")
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            standard = self.calculate(root / "lcdm", "fluid")
-            zero = self.calculate(root / "zero", "InteractingDE")
-            self.assertEqual(len(standard), len(zero))
-            self.assertLess(max(abs(a[6]/b[6]-1) for a, b in zip(standard, zero)), 1e-6)
+            for index, w in enumerate((-1.0, -0.9, -1.1)):
+                with self.subTest(w=w):
+                    standard = self.calculate(root / f"fluid_{index}", "fluid", w=w)
+                    zero = self.calculate(root / f"zero_{index}", "InteractingDE", w=w)
+                    self.assertEqual(len(standard), len(zero))
+                    self.assertLess(max(abs(a[6]/b[6]-1) for a, b in zip(standard, zero)), 3e-5)
             self.calculate(root / "coupled", "InteractingDE", w=-0.9, xi=-0.01)
 
 

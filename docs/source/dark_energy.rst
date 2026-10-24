@@ -92,3 +92,24 @@ total-matter transfers against the separately implemented fluid at ``w=-1``,
 ``-0.9`` and ``-1.1``, all at zero coupling. This checks the uncoupled limit;
 it does not certify the interacting perturbation prescription against an
 independent IDE solver.
+
+Nonzero-coupling external comparison
+-----------------------------------
+
+A cross-check of the existing type-1 implementation at revision ``afc4f97``
+against independently maintained CAMB-iDEDM and CLASS-iDMDE found matching
+backgrounds but distinct perturbation prescriptions. For constant ``w=-0.9``,
+``xi=-0.05`` at z=0 over 0.001<=k<=1 h/Mpc, maximum linear P(k) differences
+are about 0.66% against CAMB-iDEDM / CLASS DiValentino and 1.49% against
+CLASS He. The reference CAMB and CLASS DiValentino calculations agree within
+0.1% after a documented initialization repair in the reference CLASS fork.
+
+In particular, native DE density/velocity interaction sources differ from
+both reference prescriptions; sharing Q=xi H rho_de does not uniquely define
+its perturbations. The zero-coupling regression and background checks do not
+certify equivalence to these nonzero-coupling published models. The native
+model remains experimental, and this audit does not change its physics.
+
+Exact revisions, inputs, numerical convergence, the reference patch and plots
+are recorded in the `cross-check report
+<https://github.com/kjhan0606/ds10-web/blob/master/docs/ide_crosscheck.md>`_.

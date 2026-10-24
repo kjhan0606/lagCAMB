@@ -242,6 +242,7 @@
     use NonLinear
     use DarkEnergyFluid
     use DarkEnergyPPF
+    use InteractingDE, only: TInteractingDE
     use Quintessence
     use results
 #ifdef COSMOREC
@@ -409,6 +410,8 @@
         allocate (TDarkEnergyFluid::P%DarkEnergy)
     else if (DarkEneryModel == 'PPF') then
         allocate (TDarkEnergyPPF::P%DarkEnergy)
+    else if (DarkEneryModel == 'INTERACTINGDE') then
+        allocate (TInteractingDE::P%DarkEnergy)
     else if (DarkEneryModel == 'AXIONEFFECTIVEFLUID') then
         allocate (TAxionEffectiveFluid::P%DarkEnergy)
     else if (DarkEneryModel == 'EARLYQUINTESSENCE') then

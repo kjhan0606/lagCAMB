@@ -113,3 +113,34 @@ model remains experimental, and this audit does not change its physics.
 Exact revisions, inputs, numerical convergence, the reference patch and plots
 are recorded in the `cross-check report
 <https://github.com/kjhan0606/ds10-web/blob/master/docs/ide_crosscheck.md>`_.
+
+Type-1 local-expansion correction
+--------------------------------
+
+The preceding discrepancy describes the implementation at ``afc4f97``, before
+this correction. Type 1 now explicitly uses the DiValentino local-expansion
+prescription, consistent with CAMB-iDEDM and CLASS-iDMDE (DiValentino) at
+constant w and c_s^2=1. In the CDM-comoving synchronous frame, h'/2=k*z:
+
+* CDM receives xi*(rho_de/rho_c)*[H*(delta_de-delta_c)+k*z/3].
+* DE density receives the coupled rest-frame pressure correction
+  -xi*H*(cs2-w)*(3H*v_de/k) and local expansion -xi*k*z/3, replacing the
+  incorrect xi*H*(delta_c-delta_de) source.
+* With u_de=(1+w)*v_de, the DE velocity coupling is
+  +xi*H*(1+cs2)*u_de/(1+w), replacing -xi*H*u_de.
+
+At nonzero constant type-1 coupling, |1+w|<=1e-6 now raises an unsupported
+parameter error instead of silently suppressing a singular fluid velocity
+term. xi=0 LCDM and constant-w fluid limits remain supported. Other IDE types,
+variable-w coupling, and the interacting-vacuum limit are outside this
+cross-check's scope.
+
+The regression ``python -m unittest camb.tests.test_ide_reference`` compares
+three nonzero-coupling cases against frozen spectra from unmodified
+CAMB-iDEDM revision ``4c3b5854`` (not a native self-reference), at z=0,1,99.
+It also tests rejection of the singular vacuum-fluid input. The expanded
+CLI regression still checks zero-coupling LCDM and phantom/nonphantom fluids.
+
+The updated `validation report
+<https://github.com/kjhan0606/ds10-web/blob/master/docs/ide_crosscheck_fixed.md>`_
+records independent CAMB/CLASS comparisons, before/after results and limits.

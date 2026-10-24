@@ -2562,11 +2562,14 @@
 
                     select case(DE%interaction_type)
                     case(ide_Q_H_rho_de)
-                        ! CDM source: +xi*H*(rho_de/rho_c)*(delta_de - delta_c)
-                        xi_src = DE%xi_ide * adotoa * rho_de_over_c * (delta_de_val - clxc)
+                        ! Type 1: perturbed local expansion in Q=xi*H*rho_de.
+                        ! CDM-comoving synchronous gauge: h'/2=k*z, so delta H/H=k*z/(3H).
+                        ! Di Valentino / Gavela prescription, also used by CAMB-iDEDM.
+                        xi_src = DE%xi_ide * rho_de_over_c * &
+                            (adotoa * (delta_de_val - clxc) + k*z/3._dl)
                         ayprime(ix_clxc) = ayprime(ix_clxc) + xi_src
-                        ! DE source: +xi*H*delta_c (complement to existing -xi*H*delta_de in PerturbationEvolve)
-                        ayprime(EV%w_ix) = ayprime(EV%w_ix) + DE%xi_ide * adotoa * clxc
+                        ! The complete DE source is in TInteractingDE_PerturbationEvolve.
+                        ! There is no xi*H*delta_c source in its fractional density equation.
 
                     case(ide_Q_H_rho_c)
                         ! CDM source: +xi*H*(delta_de - delta_c) [Q/rho_c = xi*H]

@@ -300,6 +300,7 @@ if __name__ == "__main__":
                 "PRIMAT_Yp_DH_Error.dat",
                 "PRIMAT_Yp_DH_ErrorMC_2021.dat",
                 "PRIMAT_Yp_DH_ErrorMC_2024.dat",
-            ]
+            ],
+            "camb.tests": ["ide_reference_power.json"],
         },
     )

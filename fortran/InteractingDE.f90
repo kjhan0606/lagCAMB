@@ -13,15 +13,12 @@
     !   type 2: Q = xi * H * rho_c
     !   type 3: Q = xi * H * (rho_c + rho_de)
     !
-    ! Perturbations follow the covariant approach of Valiviita+ 2008
-    ! In the CDM rest frame, Q^mu = (Q, 0) gives:
-    !   delta_c' = -k*v_c - h'/2 + Q/(rho_c) * (delta_de - delta_c)
-    !   v_c' = -H*v_c  (CDM remains pressureless in rest frame)
-    !   delta_de' = -(1+w)(k*v_de + h'/2) - 3H(cs2-w)*delta_de + Q/rho_de*(delta_c-delta_de) ...
-    !   v_de' = ... (additional momentum transfer terms)
-    !
-    ! References: Valiviita+ 2008, He+ 2009, Gavela+ 2009, Costa+ 2017
-    !             IDECAMB (arXiv:2306.01593)
+    ! Type-1 perturbations use the local-expansion prescription compared with
+    ! CAMB-iDEDM and CLASS-iDMDE (DiValentino): delta H/H=h'/(6H), v_c=0.
+    ! The DE state is (delta_de, u_de), u_de=(1+w)*v_de.
+    ! Nonzero constant-w= -1 is singular for this fluid prescription; use xi=0 for LCDM.
+    ! Type 2/3 retain their historical approximate treatment and are not covered by
+    ! the type-1 independent cross-check. See docs/source/dark_energy.rst.
 
     integer, parameter :: ide_Q_H_rho_de = 1   ! Q = xi*H*rho_de
     integer, parameter :: ide_Q_H_rho_c = 2    ! Q = xi*H*rho_c
@@ -97,6 +94,7 @@
 
     subroutine TInteractingDE_Init(this, State)
     use classes
+    use config, only: GlobalError, error_unsupported_params
     class(TInteractingDE), intent(inout) :: this
     class(TCAMBdata), intent(in), target :: State
     real(dl) :: h2
@@ -106,6 +104,12 @@
     this%is_cosmological_constant = .false.  ! always evolve perturbations
 
     if (this%xi_ide /= 0._dl) then
+        if (this%interaction_type == ide_Q_H_rho_de .and. .not. this%use_tabulated_w .and. this%wa == 0._dl) then
+            if (abs(1._dl + this%w_lam) <= 1.e-6_dl) then
+                call GlobalError('Type-1 IDE fluid requires |1+w|>1e-6 for nonzero xi', error_unsupported_params)
+                return
+            end if
+        end if
         ! Need 2 perturbation equations: delta_de and (1+w)*v_de
         this%num_perturb_equations = 2
 
@@ -301,7 +305,7 @@
     real(dl), intent(inout) :: ayprime(:)
     real(dl), intent(in) :: a, adotoa, w, k, z, y(:)
     integer, intent(in) :: w_ix
-    real(dl) :: Hv3_over_k, Q_over_rho_de, delta_de, v_de_1pw
+    real(dl) :: Hv3_over_k, delta_de, v_de_1pw
     real(dl) :: cs2, loga, onepw_safe
 
     if (this%num_perturb_equations == 0) return
@@ -314,31 +318,11 @@
     onepw_safe = sign(max(abs(1._dl + w), 1e-6_dl), 1._dl + w)
     Hv3_over_k = 3._dl * adotoa * v_de_1pw / k / onepw_safe
 
-    ! Compute Q/(rho_de * H) = xi for type 1
-    ! The perturbation equations follow Valiviita+ 2008, Gavela+ 2009
-    select case(this%interaction_type)
-    case(ide_Q_H_rho_de)
-        Q_over_rho_de = this%xi_ide * adotoa
-
-    case(ide_Q_H_rho_c)
-        ! Q = xi*H*rho_c => Q/rho_de = xi*H*(rho_c/rho_de)
-        ! We don't have direct access to rho_c here, approximate using grhoc
-        Q_over_rho_de = 0._dl  ! simplified: interaction enters CDM equation primarily
-
-    case(ide_Q_H_rho_tot)
-        Q_over_rho_de = this%xi_ide * adotoa * 0.5_dl
-
-    case default
-        Q_over_rho_de = 0._dl
-    end select
-
     ! DE density perturbation equation:
     ! delta_de' = -3H(cs2-w)*delta_de - (1+w)*k*v_de - (1+w)*k*z
     !             - 3H(cs2-w)*(1+w)*3H*v_de/k  [the Hv3_over_k term]
     !             + Q_interaction_perturbation_terms
-    ! For type 1 (Q=xi*H*rho_de):
-    !   Additional: +xi*H*(delta_c - delta_de) where delta_c comes from constraint
-    !   At leading order, the xi terms modify the effective w evolution
+    ! Type-1 coupling corrections are added below; these lines are the uncoupled fluid terms.
     ayprime(w_ix) = -3._dl * adotoa * (cs2 - w) * (delta_de + (1._dl + w) * Hv3_over_k) &
         - (1._dl + w) * k * v_de_1pw / onepw_safe &
         - (1._dl + w) * k * z
@@ -356,11 +340,13 @@
         end if
     end if
 
-    ! Interaction source terms for delta_de:
-    ! Type 1: -xi*H*delta_de (self-damping; the +xi*H*delta_c is added in equations.f90)
-    ! Type 2 and 3: handled entirely in equations.f90 where rho_c/rho_de is available
+    ! Type-1 local-expansion prescription (Di Valentino / Gavela), Q=xi*H*rho_de.
+    ! The coupled rest-frame pressure transformation adds xi to 3(1+w).
+    ! delta Q contains the local expansion perturbation h'/6=k*z/3.
+    ! No xi*H*(delta_c-delta_de) term belongs in this fractional DE equation.
     if (this%xi_ide /= 0._dl .and. this%interaction_type == ide_Q_H_rho_de) then
-        ayprime(w_ix) = ayprime(w_ix) - this%xi_ide * adotoa * delta_de
+        ayprime(w_ix) = ayprime(w_ix) - this%xi_ide * adotoa * (cs2 - w) * Hv3_over_k &
+            - this%xi_ide * k*z/3._dl
     end if
 
     ! DE velocity equation:
@@ -371,7 +357,9 @@
             k * cs2 * delta_de
         ! Interaction term in velocity
         if (this%xi_ide /= 0._dl .and. this%interaction_type == ide_Q_H_rho_de) then
-            ayprime(w_ix + 1) = ayprime(w_ix + 1) - this%xi_ide * adotoa * v_de_1pw
+            ! CDM-comoving frame v_c=0; u_de=(1+w)*v_de at constant w.
+            ayprime(w_ix + 1) = ayprime(w_ix + 1) + &
+                this%xi_ide * adotoa * (1._dl + cs2) * v_de_1pw / onepw_safe
         end if
     else
         ayprime(w_ix + 1) = 0._dl

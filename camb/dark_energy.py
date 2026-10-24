@@ -352,7 +352,13 @@ class InteractingDE(DarkEnergyEqnOfState):
         2: Q = xi * H * rho_c
         3: Q = xi * H * (rho_c + rho_de)
 
-    References: Valiviita+ 2008, Costa+ 2017, IDECAMB (arXiv:2306.01593).
+    Type 1 uses the local-expansion DiValentino prescription in the CDM-comoving
+    synchronous frame, including the perturbation of H in Q. Constant-w, cs2=1
+    cases are cross-checked against CAMB-iDEDM and CLASS-iDMDE. Nonzero type-1
+    coupling with constant |1+w|<=1e-6 is rejected: this fluid is not an
+    interacting-vacuum model. Type 2/3 retain historical approximate treatments.
+
+    References: Lucca & Hooper 2020 (arXiv:2002.06127), CLASS-iDMDE/CAMB-iDEDM.
     """
 
     # Cannot add _fields_ here because DarkEnergyEqnOfState has unmapped

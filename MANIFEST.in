@@ -1,5 +1,6 @@
 include *.rst *.txt
 recursive-include camb *.py
+include camb/tests/ide_reference_power.json
 recursive-include fortran Makefile* *.dat *.?90
 recursive-include forutils Makefile* *.?90
 exclude camb/cambdll.dll

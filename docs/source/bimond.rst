@@ -140,7 +140,7 @@ singularity.
 An unequal-metric background also requires a derivation of the local weak-field
 limit before coupling to the existing lagRamses QUMOND operator. A regular
 background integration alone does not validate the nonrelativistic matching.
-Linear scalar perturbations, regular initial modes, relativistic stability,
+Cosmological scalar evolution, regular initial modes, relativistic stability,
 recombination coupled to the selected expansion, and observable transfer
 functions remain implementation requirements.
 
@@ -243,8 +243,8 @@ symbolic differentiation was :math:`1.89\times10^{-15}`. Independent quadrature
 of the primitive agreed to :math:`6.67\times10^{-16}` relative error over
 :math:`10^{-10}\le|Z|\le10^{10}`. On the fixed interval
 :math:`0\le\tau\le0.01`, the tight integrations had maximum normalized
-constraint errors of :math:`2.18\times10^{-16}` for the regular positive branch
-and :math:`2.85\times10^{-14}` for the negative branch. Decreasing tolerances
+constraint errors of :math:`2.17\times10^{-16}` for the regular positive branch
+and :math:`2.84\times10^{-14}` for the negative branch. Decreasing tolerances
 reduced the negative-branch errors. The positive-branch runs used identical
 steps and reached roundoff precision, so the positive fixture does not measure
 a convergence order.
@@ -430,3 +430,85 @@ inverses and reports unresolved null sectors without a stability verdict.
 
 .. automodule:: camb.bimond_symbolic
    :members: QuadraticAction, quadratic_action, principal_part
+
+Complete local scalar operator
+------------------------------
+
+``camb.bimond_scalar.constrained_scalar_system(action)`` accepts the full
+matter-completed scalar action and exports the finite-wavenumber coefficient
+blocks. The dynamical variables are
+:math:`x=(\zeta,\hat\phi,\hat\zeta,\hat\ell,\chi)` and the auxiliary variables
+are the two contravariant shifts :math:`y=(S,T)`. After integrating shift
+velocities by parts, the quadratic action is
+
+.. math::
+
+   L_2=\frac12\dot x^T K_d\dot x+\dot x^T B_d x+\frac12x^T D_d x
+       +\dot x^T C y+x^T E y+\frac12 y^T A_y y.
+
+Eliminating the shifts gives
+
+.. math::
+
+   K_{\rm eff}&=K_d-CA_y^{-1}C^T,\\
+   B_{\rm eff}&=B_d-CA_y^{-1}E^T,\\
+   D_{\rm eff}&=D_d-EA_y^{-1}E^T.
+
+The complete retained equations are
+
+.. math::
+
+   K_{\rm eff}\ddot x+
+   (\dot K_{\rm eff}+B_{\rm eff}-B_{\rm eff}^T)\dot x+
+   (\dot B_{\rm eff}-D_{\rm eff})x=0.
+
+The evaluator computes background accelerations from the homogeneous
+Euler--Lagrange equations and jerks by differentiating those equations.
+Coefficient derivatives include the evolving metric rates, dust density,
+radiation rate, and interaction-function derivatives through
+:math:`\mathcal M^{(4)}`. The supplied interaction derivatives must describe
+one consistent local function. No rate is frozen. The export retains exact
+symbolic blocks and derivative rules without expanding a large symbolic
+matrix inverse.
+
+``ScalarOperator.reconstruct`` returns the shifts, their first derivatives,
+and the dust density perturbation from the original lapse equation. The
+evaluator rejects failed background constraints or tadpoles, nonalgebraic
+shift sectors, and unresolved inverses. It does not regularize those cases.
+This is a local operator and reconstruction API; it does not evolve a
+cosmological history or prescribe initial modes. The two previously tested
+backgrounds still have ghosts. Perfect-fluid radiation does not provide
+photon or neutrino transfer functions.
+
+The standalone validation/export command is intended for an allocated
+compute node:
+
+.. code-block:: bash
+
+   python fortran/tests/verify_bimond_scalar_operator.py \
+       --output NEW_OPERATOR_REPORT.json \
+       --coefficients NEW_SYMBOLIC_COEFFICIENTS.json --dps 80
+
+It tests the two established local backgrounds at :math:`k=10,100,1000`,
+checks the full action and Euler--Lagrange identities, reconstructs the
+retained and lapse equations, and compares coefficient derivatives with
+local directional differences along the evolving background. These
+directional probes are not additional background evolutions. Both output
+files use exclusive creation.
+
+Grammar Slurm job ``1274186`` completed the operator validation in 65 seconds
+with peak recorded memory of 185056 KiB. Both exact action/Euler--Lagrange
+identities and all six local sign/wavenumber cases passed at 80-digit precision.
+The maximum normalized original-equation residual was
+:math:`1.56\times10^{-75}`, and the maximum lapse-reconstruction residual was
+:math:`3.49\times10^{-81}`. Central directional differences along the evolving
+background agreed with the analytic coefficient derivatives to
+:math:`2.05\times10^{-33}` in the specified scaled norm. Every local fixture
+retained two negative scalar kinetic directions. Off-shell matter-density
+inputs were rejected. The compact record is
+``fortran/tests/bimond_validation_2026-11-07/scalar_operator.json``.
+The exact coefficient export remains a reconstructable local operator, not
+a cosmological time integration or transfer calculation.
+
+.. automodule:: camb.bimond_scalar
+   :members: constrained_scalar_system, ScalarSystem, ScalarOperator, ScalarReconstruction

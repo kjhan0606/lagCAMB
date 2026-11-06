@@ -512,3 +512,170 @@ a cosmological time integration or transfer calculation.
 
 .. automodule:: camb.bimond_scalar
    :members: constrained_scalar_system, ScalarSystem, ScalarOperator, ScalarReconstruction
+
+Finite-interval scalar histories
+-------------------------------
+
+``camb.bimond_history`` supplies an arbitrary-precision background history
+and the fundamental matrix of the complete scalar differential operator.
+This implementation uses the positive-Einstein--Hilbert research candidate,
+:math:`\alpha=\beta=1`, with
+
+.. math::
+
+   \mathcal M(Z)=M_0+\operatorname{sgn}(Z)
+       \left[4\sqrt{|Z|}-16\ln\left(1+\frac{\sqrt{|Z|}}4\right)\right].
+
+The ordinary matter inventory is irrotational dust and perfect radiation;
+there is no twin matter. The negative-argument continuation remains an
+explicit research specification. This module does not use the earlier
+double-precision Fortran background for the negative-Einstein--Hilbert
+candidate.
+
+``BackgroundHistory`` evolves
+:math:`(\ln a,\ln b,\ln X,U,V,W)` with the homogeneous equations at arbitrary
+precision. Its inputs must be exact symbolic numbers, integers, or declared
+decimal strings. Binary floating-point seeds and symbolic expressions
+containing floating-point approximations are rejected. Converting a
+double-precision trajectory to decimal strings would not restore its
+precision or establish its constraint accuracy.
+
+Dust density times :math:`a^3` and the background radiation-field rate times
+:math:`a` are conserved through the exact matter continuity integrals. The
+lapse constraint is monitored without projection or density adjustment.
+The default calculation uses 80 working decimal digits and a background
+Taylor tolerance of :math:`10^{-65}`. Every actual scalar collocation point,
+accepted endpoint, and diagnostic query must pass the existing on-shell
+operator tolerance of :math:`10^{-45}`, the signed-branch check, and the
+matrix-conditioning checks. Interaction derivatives through fourth order
+are evaluated from the analytic function at each state.
+
+The background and linear perturbations are coupled in one direction:
+first-order perturbations do not alter the homogeneous solution. A separate
+dense background solve is therefore sufficient. The Taylor derivative
+callback preserves the integrator's temporary guard precision. Its error
+must be checked by independent precision/tolerance refinement; a small
+constraint residual alone does not measure trajectory error.
+
+``ScalarHistory`` integrates the ten-dimensional fundamental matrix with
+arbitrary-precision Gauss--Legendre collocation. Its coordinate order is
+
+.. math::
+
+   (x,\dot x),\qquad
+   x=(\zeta,\hat\phi,\hat\zeta,\hat\ell,\chi),
+
+where derivatives refer to :math:`\tau=H_{\rm ref}t` and the radiation field
+retains the normalization of :math:`P(Y)=\kappa Y^2`. The wavenumber is the
+constant dimensionless comoving :math:`k` appearing in the cosine/sine
+decomposition. The initial identity matrix specifies mathematical basis
+responses. It is not an adiabatic-mode prescription, a physical perturbation
+realization, or a density/velocity transfer table. No negative kinetic
+direction is projected out.
+
+With six Gauss stages, accepted endpoints have order twelve. The dense
+collocation polynomial has lower accuracy; its differential defect is
+evaluated away from the collocation nodes and reported separately.
+Step refinement compares both absolute and relative fundamental-matrix
+errors. Precision refinement uses the same exact initial expressions and
+a separately generated tighter background.
+
+``shift_second_derivative`` differentiates the reconstructed shift-rate
+function along the coupled background/scalar tangent using guarded
+fourth-order directional differences and Richardson extrapolation. Both
+shift accelerations are supplied explicitly to dust-density reconstruction.
+The interaction jets are recomputed from the analytic function at each
+directional probe. This also supplies any higher interaction derivative
+needed by differentiating the shift rate; independent jet entries are not
+held fixed during that differentiation.
+The verification checks difference-step and precision refinement and an
+independent time difference of shift rates along the numerical history.
+Directional probes depart from the constraint surface at second order in
+their tiny displacement; they remain subject to the same on-shell gate and
+are not additional evolved background states. The report's conservative
+maximum constraint diagnostic includes these probes as well as the actual
+history queries.
+
+The bounded verification uses only the two established local backgrounds,
+:math:`k=10`, and :math:`0\leq\tau\leq0.001`. It compares two, four, and
+eight steps and 80 versus 100 working digits, checks the original retained
+and lapse equations along the trajectory, and retains the kinetic-signature
+evidence. Run on an allocated Grammar CPU node using
+
+.. code-block:: bash
+
+   python fortran/tests/verify_bimond_scalar_history.py \
+       --output NEW_SCALAR_HISTORY.json --dps 80
+
+The accompanying ``run_bimond_scalar_history.sbatch`` creates a new private
+run directory, copies the source into an isolated snapshot, and records
+source and result hashes. Its required ``BIMOND_EXPECTED_REVISION`` must
+identify the reviewed source base. Outputs use exclusive creation.
+
+A finite history on these ghost-bearing states is an equation and numerical
+instability diagnostic. It does not admit the states as viable cosmologies.
+Regular cosmological initial modes, photon/neutrino hierarchies,
+recombination, observable transfer functions, and matching cosmological
+nonlinear force equations remain separate requirements.
+
+Grammar job ``1274830`` passed the bounded verification in 6 minutes
+32 seconds, with peak recorded memory of 209628 KiB. The following errors
+apply only to the two established backgrounds, :math:`k=10`, and
+:math:`0\leq\tau\leq0.001`:
+
+.. list-table:: Measured history convergence
+   :header-rows: 1
+   :widths: 48 26 26
+
+   * - Quantity
+     - Positive branch
+     - Negative branch
+   * - Four-versus-eight-step endpoint matrix difference, absolute
+     - :math:`1.18\times10^{-38}`
+     - :math:`5.42\times10^{-25}`
+   * - Same endpoint difference, relative
+     - :math:`3.20\times10^{-39}`
+     - :math:`2.97\times10^{-26}`
+   * - Eight-step endpoint difference, 80 versus 100 digits, relative
+     - :math:`8.46\times10^{-74}`
+     - :math:`1.61\times10^{-71}`
+   * - Background refinement at collocation/query points, absolute
+     - :math:`1.20\times10^{-72}`
+     - :math:`7.38\times10^{-71}`
+   * - Eight-step dense scalar differential defect, scaled
+     - :math:`6.59\times10^{-22}`
+     - :math:`1.92\times10^{-15}`
+   * - Independent trajectory check of shift acceleration, absolute
+     - :math:`3.04\times10^{-16}`
+     - :math:`1.27\times10^{-9}`
+   * - Same shift-acceleration check, relative
+     - :math:`6.39\times10^{-20}`
+     - :math:`1.37\times10^{-14}`
+
+The negative-branch endpoint error is controlled by time discretization,
+not arithmetic precision. The lower-order dense-polynomial defect and the
+trajectory check of shift acceleration must not be replaced by the much
+smaller endpoint precision difference when quoting accuracy.
+
+At the final history checkpoints the normalized lapse-constraint residuals
+are :math:`3.37\times10^{-75}` and :math:`8.10\times10^{-74}`. The conservative
+maximum including directional probes is :math:`4.02\times10^{-55}`, below
+the :math:`10^{-45}` gate. The largest normalized original retained-equation
+and lapse-reconstruction residuals at the reported checkpoints are
+:math:`1.44\times10^{-78}` and :math:`5.86\times10^{-81}`, respectively.
+Both branches retain two negative kinetic directions at every reported
+checkpoint. Binary64 initial seeds, off-shell dust densities, deliberately
+unresolved conditioning, and a changed :math:`Z` branch were rejected.
+
+The complete measured report is
+``fortran/tests/bimond_validation_2026-11-07/scalar_history.json``.
+``scalar_history_execution.json`` records the scheduler result, source base,
+scope, and the preserved failed run ``1274824``. That earlier run stopped
+because its precision-comparison endpoint rounded beyond the tighter
+history's endpoint. The correction compares matching endpoint fractions;
+the evolution method and physical interval did not change. Source and
+artifact checksum files accompany the report, and the current numerical
+source files match the successful frozen Grammar snapshot.
+
+.. automodule:: camb.bimond_history
+   :members: BackgroundHistory, ScalarHistory, SignedRationalInteraction, shift_second_derivative, reconstruction_residuals

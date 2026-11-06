@@ -1,0 +1,55 @@
+{
+  "base_revision": "d59390595b437702b856c2db5994f986232e443c",
+  "constraint_diagnostic_scope": "The report maximum includes actual histories and tiny O(h^2) off-shell directional probes; checkpoint operator_diagnostics give history-only values.",
+  "copied_name_mapping": {
+    "artifacts.sha256": "scalar_history_remote_artifacts.sha256",
+    "base_revision.txt": "scalar_history_base_revision.txt",
+    "scalar_history.json": "scalar_history.json",
+    "source.sha256": "scalar_history_source.sha256"
+  },
+  "cosmological_initial_modes": false,
+  "elapsed": "00:06:32",
+  "exit_code": "0:0",
+  "failed_run_preserved": {
+    "exit_code": "1:0",
+    "job_id": "1274824",
+    "reason": "Lower-precision endpoint rounded just beyond higher-precision endpoint in validation comparison. Fixed by comparing each history at matching endpoint fractions; no integration method or interval change.",
+    "run_directory": "/gpfs/kjhan/RAR_QUMOND/runs/bimond_scalar_history_1274824",
+    "state": "FAILED"
+  },
+  "ghost_projection": false,
+  "history_state_order": [
+    "ln_a",
+    "ln_b",
+    "ln_X",
+    "U",
+    "V",
+    "W"
+  ],
+  "job_id": "1274830",
+  "maximum_rss_kib": 209628,
+  "node": "grammar-debug",
+  "precision": "80-digit arithmetic, independently repeated at 100 digits; truncation errors measured separately",
+  "remote_artifact_manifest": "scalar_history_remote_artifacts.sha256",
+  "result": "scalar_history.json",
+  "run_directory": "/gpfs/kjhan/RAR_QUMOND/runs/bimond_scalar_history_1274830",
+  "scalar_state_order": [
+    "zeta",
+    "phihat",
+    "zetahat",
+    "ellhat",
+    "chi",
+    "zeta_dot",
+    "phihat_dot",
+    "zetahat_dot",
+    "ellhat_dot",
+    "chi_dot"
+  ],
+  "scheduler_host": "grammar.kias.re.kr",
+  "schema": "bimond-scalar-history-scheduler-evidence-v1",
+  "scope": "Two established ghost-bearing alpha=beta=1 backgrounds, k=10, tau in [0,0.001]; mathematical fundamental basis responses only",
+  "source_manifest": "scalar_history_source.sha256",
+  "source_snapshot_matches_worktree_files": true,
+  "state": "COMPLETED",
+  "transfer_function_admission": false
+}

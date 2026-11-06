@@ -1,0 +1,114 @@
+{
+  "action": {
+    "general_lapse_differentiated": true,
+    "max_scaled_symbolic_error": 1.887379141862766e-15
+  },
+  "degenerate_trajectory": {
+    "initial_state": [
+      0.0,
+      0.2,
+      -0.1,
+      1.0,
+      0.4,
+      42.24075978238114
+    ],
+    "max_step": 0.0001,
+    "rejection": "Singular or ill-conditioned homogeneous Hessian: condition=1.02138e+12",
+    "requested_tau_span": [
+      0,
+      0.01
+    ]
+  },
+  "integration_branch_+1": {
+    "final_z": 0.15050900481371937,
+    "initial_state": [
+      0.0,
+      0.2,
+      -0.1,
+      1.0,
+      0.65,
+      0.0787933580123135
+    ],
+    "initial_z": 0.15011002281036645,
+    "loose_vs_tight_max_state_error": 0.0,
+    "max_abs_normalized_constraint": [
+      2.1701725419928547e-16,
+      2.1701725419928547e-16,
+      2.1701725419928547e-16
+    ],
+    "max_hessian_condition": 11.535324268121112,
+    "medium_vs_tight_max_state_error": 0.0,
+    "nfev": [
+      17,
+      17,
+      17
+    ],
+    "tau_span": [
+      0,
+      0.01
+    ]
+  },
+  "integration_branch_-1": {
+    "final_z": -203.49052341686217,
+    "initial_state": [
+      0.0,
+      0.2,
+      -0.1,
+      1.0,
+      1.0,
+      -127.8269470625813
+    ],
+    "initial_z": -157.63340456500566,
+    "loose_vs_tight_max_state_error": 0.0005309408337978994,
+    "max_abs_normalized_constraint": [
+      8.773330897601652e-09,
+      7.539880922735025e-12,
+      2.8443975585391925e-14
+    ],
+    "max_hessian_condition": 86127.35018384001,
+    "medium_vs_tight_max_state_error": 8.788351379962478e-08,
+    "nfev": [
+      104,
+      191,
+      356
+    ],
+    "tau_span": [
+      0,
+      0.01
+    ]
+  },
+  "interaction": {
+    "abs_z_range": [
+      1e-10,
+      10000000000.0
+    ],
+    "max_relative_derivative_error": 2.220446049250313e-16,
+    "max_relative_primitive_error": 6.661338147750939e-16
+  },
+  "tensor_principal_matrices": [
+    {
+      "branch": 1,
+      "gradient_determinant": -0.9454741165554401,
+      "kinetic_determinant": -4.52948149452921,
+      "kinetic_eigenvalues": [
+        -7.178338996139541,
+        0.630992977200594
+      ],
+      "m": 1.518450199372986,
+      "s": 1.822118800390509,
+      "t": 2.0137527074704766
+    },
+    {
+      "branch": -1,
+      "gradient_determinant": -1.0951575486517553,
+      "kinetic_determinant": -2.079908316755747,
+      "kinetic_eigenvalues": [
+        -2.2749768796035066,
+        0.9142547053569368
+      ],
+      "m": 0.09521044036802989,
+      "s": 1.822118800390509,
+      "t": 2.0137527074704766
+    }
+  ]
+}

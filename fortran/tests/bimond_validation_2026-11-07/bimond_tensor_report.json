@@ -1,0 +1,18 @@
+{
+  "checks": {
+    "no_linear_tensor_Z": true,
+    "connection_contraction": true,
+    "tensor_kinetic_matrix": true,
+    "tensor_gradient_matrix": true,
+    "kinetic_determinant": true,
+    "gradient_determinant": true,
+    "formal_equal_ratio_determinant": true,
+    "high_acceleration_kinetic": true,
+    "high_acceleration_gradient": true
+  },
+  "all_pass": true,
+  "scope": "Principal TT sector of alpha=-1,beta=1,f=1 with M'(Z)>0 at Z!=0",
+  "implication": "K positive definite requires m<1, implying det(G)<0 for s,t,m>0. Otherwise K is negative or degenerate in at least one tensor direction.",
+  "not_claimed": "No conclusion about other BIMOND actions or a constrained theory on a degenerate tensor surface.",
+  "sympy_version": "1.14.0"
+}

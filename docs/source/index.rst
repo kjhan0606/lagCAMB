@@ -69,6 +69,7 @@ Other modules:
    :maxdepth: 1
 
    bbn
+   bimond
    dark_energy
    dark_matter
    initialpower

@@ -1,0 +1,41 @@
+{
+  "sympy_version": "1.14.0",
+  "scope": "Gravitational scalar/vector quadratic action, alpha/beta arbitrary, f=1",
+  "vector": {
+    "checks": {
+      "background_Z": true,
+      "background_L": true,
+      "linear_vector_Z_zero": true,
+      "linear_vector_L_zero": true,
+      "vector_principal_action": true,
+      "no_full_shift_velocity_hessian": true,
+      "no_shift_symplectic_pair": true,
+      "reduced_vector_kinetic_coefficient": true,
+      "no_principal_vector_spatial_gradient": true
+    },
+    "all_pass": true,
+    "wall_seconds": 0.5665930120740086,
+    "reduced_vector_coefficient": "-m**2*(1 - m)*(1 - s)**2/(-m*(t + 1) + t)",
+    "shift_solution": {
+      "u": "(-d*m**2*s + d*m**2)/(m*t + m - t)",
+      "v": "(-d*m**2*s + d*m**2 + d*m*s - d*m)/(m*t + m - t)"
+    }
+  },
+  "scalar": {
+    "checks": {
+      "background_Z": true,
+      "background_L": true,
+      "homogeneous_Z1": true,
+      "homogeneous_Z2": true,
+      "homogeneous_L1": true,
+      "homogeneous_L2": true,
+      "homogeneous_common_lapse_derivative_cancels": true,
+      "principal_common_time_gauge": true,
+      "principal_common_spatial_gauge": true,
+      "scalar_time_hessian_symmetric": true
+    },
+    "all_pass": true,
+    "wall_seconds": 15.126941819908097
+  },
+  "all_pass": true
+}

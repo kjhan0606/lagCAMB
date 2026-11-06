@@ -264,3 +264,169 @@ Compact reports reside in ``fortran/tests/bimond_validation_2026-11-07/``.
 
 .. automodule:: camb.bimond
    :members:
+
+Scalar and vector variational equations
+--------------------------------------
+
+The separate ``camb.bimond_symbolic`` module generates the quadratic action for
+general Einstein--Hilbert coefficients :math:`\alpha,\beta` and :math:`f=1`.
+The generator expands both inverse metrics, both connections, the ordinary
+contraction of :math:`\Upsilon_{\mu\nu}`, and the three volume factors through
+second order. The resulting action retains background terms and terms with one
+derivative as well as the principal terms. No gauge or perturbation constraint
+is imposed during generation.
+
+The scalar coordinates are
+:math:`(\phi,S,\zeta,\ell,\hat\phi,T,\hat\zeta,\hat\ell)`.
+The ordinary lapse is :math:`e^\phi`, the twin lapse is :math:`Xe^{\hat\phi}`,
+and the ordinary spatial metric is
+:math:`a^2\operatorname{diag}(e^{2\zeta},e^{2\zeta},e^{2\ell})`.
+The twin spatial metric uses :math:`b,\hat\zeta,\hat\ell`.
+The contravariant longitudinal shifts are :math:`S,T`. Both shifts and both
+lapse perturbations remain in the generated action.
+
+The vector coordinates are :math:`(P,S,Q,T)` for a wave along the third spatial
+axis and one transverse component along the first axis. The off-diagonal
+spatial metric perturbations are :math:`a^2P` and :math:`b^2Q`, with
+:math:`P=\partial_z F_x` and :math:`Q=\partial_z\hat F_x`. The contravariant
+transverse shifts are :math:`S,T`. Quadratic ADM shift terms in the temporal
+metric components are retained.
+
+Grammar job ``1274098`` verified 19 identities for the gravitational generator.
+The checks recover the general-lapse homogeneous action, the common lapse
+constraint direction, both scalar principal gauge directions, and the
+independently derived vector action. The full vector action has no shift
+velocity Hessian and no antisymmetric shift symplectic pair. The scalar output
+contains eight-field principal matrices and the complete unreduced quadratic
+action. Eigenvalues of the unreduced scalar Hessian do not constitute a scalar
+stability test.
+
+Positive Einstein--Hilbert candidate
+-----------------------------------
+
+A subsequent research candidate uses :math:`\alpha=\beta=1`, conventional
+positive matter actions, and
+
+.. math::
+
+   M'(Z)=\frac2{4+\sqrt{|Z|}},\qquad
+   M(Z)=M_0+\operatorname{sgn}(Z)
+       \left[4\sqrt{|Z|}-16\ln\left(1+\frac{\sqrt{|Z|}}4\right)\right].
+
+The interaction scalar still contracts with the ordinary inverse metric alone.
+Equal Einstein--Hilbert coefficients therefore do not make the action
+exchange-symmetric. The fixed numerical ``camb.bimond`` background model
+retains the earlier :math:`\alpha=-1,\beta=1` action. The symbolic generator
+keeps the two candidates distinct.
+
+For the positive-coefficient candidate, let
+:math:`u=\dot F-S`, :math:`v=\dot{\hat F}-T`, and
+:math:`d=\dot F-\dot{\hat F}`. The principal vector action for one transverse
+component is
+
+.. math::
+
+   L_{V,\mathrm{principal}}=\frac{a^3k^2}{32\pi G}
+       [(1-m)u^2+2muv+(t-m)v^2-2m(1-s)dv].
+
+Eliminating the principal shift constraints gives
+
+.. math::
+
+   L_{V,\mathrm{reduced}}=\frac{a^3k^2}{32\pi G}C_Vd^2,\qquad
+   C_V=-\frac{m^2(1-s)^2(1-m)}{t-m(1+t)}.
+
+The near-equal metric-coefficient region has :math:`t-m(1+t)>0` for the
+specified function and finite nonzero :math:`Z`. A generic displacement with
+:math:`s\ne1` therefore has a negative relative-vector kinetic coefficient.
+The region
+
+.. math::
+
+   0<s<1,\qquad 0<m<1,\qquad ms<t(1-m)<m
+
+can pass the principal tensor and vector kinetic conditions. The interaction
+and background equations determine :math:`m,s,t` jointly. The inequalities do
+not establish a cosmological solution. The vector has zero principal spatial
+speed, so lower-order terms remain necessary for finite-frequency evolution.
+The surfaces :math:`s=1` and :math:`t-m(1+t)=0` require a separate constrained
+analysis.
+
+The optional scalar matter completion supplies irrotational dust and a
+radiation scalar,
+
+.. math::
+
+   L_d=-\frac12\sqrt{-g}\,\lambda
+       (g^{\mu\nu}\partial_\mu T_d\partial_\nu T_d+1),\qquad
+   L_r=\sqrt{-g}\,\kappa Y^2,\quad
+   Y=-\frac12g^{\mu\nu}\partial_\mu\chi\partial_\nu\chi.
+
+Positive dust density and :math:`\kappa>0,Y>0` provide healthy material
+kinetics for a constrained scalar calculation. The radiation scalar has
+:math:`p_r=\rho_r/3` and sound speed squared :math:`1/3`. The matter completion
+serves a kinetic and constraint calculation. Photon and neutrino hierarchies,
+anisotropic stress, baryon thermodynamics, and recombination remain necessary
+for physical transfer functions.
+
+Constrained scalar result at two local backgrounds
+-------------------------------------------------
+
+Grammar Slurm job ``1274137`` repeated all 19 gravitational identities after
+adding the matter action and evaluated two local backgrounds at 80-digit
+precision. The backgrounds use :math:`M_0=0`, :math:`\bar a_0=1`,
+:math:`a=1`, :math:`b=1/\sqrt2`, :math:`X=\sqrt2`, :math:`U=1`, and
+:math:`V=1/2`. The selected values
+:math:`Z=\pm[4(\sqrt2-1)]^2` give :math:`s=t=m=1/4`, inside the principal
+tensor/vector-admissible region. Radiation density is :math:`0.02`, with
+:math:`\dot{\bar\chi}=1` and :math:`\kappa=2/75` in the declared units.
+
+The homogeneous constraint fixes positive dust densities of approximately
+:math:`2.56018` and :math:`3.77482` for positive and negative :math:`Z`.
+The homogeneous equations fix both scale-factor accelerations and the relative
+lapse acceleration. The full matter-completed linear action vanishes modulo
+boundaries on both local solutions. The maximum normalized tadpole residuals
+are :math:`4.01\times10^{-80}` and :math:`3.61\times10^{-79}`.
+
+The dust clock fixes the common time coordinate, and :math:`\ell=\zeta` fixes
+the common scalar spatial coordinate. Variation of the dust multiplier imposes
+:math:`\phi=0`. The ordinary lapse equation reconstructs the dust density
+perturbation. Both shifts pass the auxiliary-variable checks. Integration by
+parts retains background time derivatives before eliminating the shifts at
+finite wavenumber. The remaining variables are
+:math:`(\zeta,\hat\phi,\hat\zeta,\hat\ell,\delta\chi)`.
+
+At dimensionless wavenumbers :math:`k=10,100,1000`, both backgrounds have a
+nonsingular five-variable kinetic matrix with two negative eigenvalues.
+At :math:`k=100`, the negative eigenvalues are approximately
+:math:`(-64936.24,-0.111006)` for positive :math:`Z` and
+:math:`(-27576.50,-0.708438)` for negative :math:`Z`.
+The eigenvalue magnitudes depend on coordinate normalization and are not
+instability rates. The number of negative physical kinetic directions is
+invariant under nonsingular changes of field variables.
+
+The radiation kinetic block is exactly :math:`K_{\chi\chi}=0.04` with zero
+kinetic cross terms. The saved negative-direction certificates have zero
+radiation component. The two negative directions therefore occupy the metric
+and dust-clock sector. The nonsingular reduced kinetic matrix leaves no
+additional local primary constraint capable of removing the negative
+directions. Both tested backgrounds contain scalar ghosts. The result excludes
+the two local backgrounds, not the whole positive-coefficient action or other
+BIMOND theories. No characteristic growth rate or transfer function has been
+computed.
+
+The complete record is
+``fortran/tests/bimond_validation_2026-11-07/scalar_constraints.json``.
+The generator and standalone audit can be run on an allocated compute node
+with
+
+.. code-block:: bash
+
+   python fortran/tests/verify_bimond_scalar_vector.py camb/bimond_symbolic.py NEW_RESULT_DIRECTORY
+   python fortran/tests/audit_bimond_scalar_constraints.py --output NEW_SCALAR_REPORT.json
+
+Both commands preserve existing result files. The audit rejects singular
+inverses and reports unresolved null sectors without a stability verdict.
+
+.. automodule:: camb.bimond_symbolic
+   :members: QuadraticAction, quadratic_action, principal_part
